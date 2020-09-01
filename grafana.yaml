@@ -1,0 +1,50 @@
+# Generated automatically from grafana-tp-link script
+version: "3.7"
+
+services:
+    # setup grafana
+    grafana:
+      container_name: grafana-local
+      image: grafana/grafana:latest
+      # here you put your user id that owns the directories - 1000 is an example!
+      user: "1000"
+      # setup grafana volume mounts for persistence.
+      volumes:
+        - "/usr/grafana-container-data/data:/var/lib/grafana"
+        - "/usr/grafana-container-data/log:/var/log/grafana"
+        - "/usr/grafana-container-data/config:/etc/grafana"
+      # this is the default port used by Grafana - if you need to use another, change it.
+      depends_on:
+        - prometheus
+      ports:
+        - 3000:3000
+      # the service is always restarted unless it is manually stopped.
+      restart: unless-stopped
+
+    # setup prometheus database
+    prometheus:
+      container_name: prometheus-local
+      image: prom/prometheus:latest
+      command:
+        - "--storage.tsdb.retention.time=3y"
+        - "--web.enable-lifecycle"
+        - "--config.file=/etc/prometheus/prometheus.yml"
+      user: "1000"
+      ports:
+        - 9090:9090
+      volumes:
+        - /usr/prometheus-container-data/config:/etc/prometheus
+        - /usr/prometheus-container-data/data:/prometheus
+      depends_on:
+        - tp-link-plug-exporter
+      restart: unless-stopped
+
+    # setup the tp-link exporter
+    tp-link-plug-exporter:
+      container_name: tp-link-plug-exporter-local
+      image: fffonion/tplink-plug-exporter:latest
+      ports:
+        - 9233:9233
+      # the service is always restarted unless it is manually stopped.
+      restart: unless-stopped
+

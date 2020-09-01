@@ -1,0 +1,482 @@
+#!/bin/bash
+
+# Grafana based Power Monitoring using HS110 Power Plugs
+#
+
+# pretty functions for log output
+function cli_info { echo -e " -- \033[1;32m$1\033[0m" ; }
+function cli_info_read { echo -e -n " -- \e[1;32m$1\e[0m" ; }
+function cli_warning { echo -e " ** \033[1;33m$1\033[0m" ; }
+function cli_warning_read { echo -e -n " ** \e[1;33m$1\e[0m" ; }
+function cli_error { echo -e " !! \033[1;31m$1\033[0m" ; }
+
+# check if we have access to curl, docker-compose, and jq
+if [[ ! -x "$(command -v jq)" ]] || \
+[[ ! -x "$(command -v docker-compose)" ]] || \
+[[ ! -x "$(command -v curl)" ]]; then
+  cli_error "curl, docker-compose, and jq need to be installed and accessible - cannot continue."
+  exit 1
+else
+  cli_info "curl, docker-compose, and jq appear to be present."
+fi
+
+# the grafana dockerfile name
+GRAFANA_DOCKERFILE=grafana.yaml
+
+# delete the files created
+CLEAN_UP=false
+# setup also the Grafana data source as the prometheus container
+SETUP_GRAF_SOURCE=true
+# select to make the dashboard default
+SETUP_GRAF_DEFAULT_DASH=true
+
+# configure ufw for grafana flag - only configures it if true
+UFW_CONF=true
+# configure the local subnet
+IP_BASE="10.10.1"
+UFW_SUBNET="${IP_BASE}.0/24"
+# the rule name
+UFW_GRAF_RULENAME="grafana"
+
+# create the volumes based on the user
+USER_UID=$(id -u)
+USER_NAME=$(whoami)
+
+# hostnames for the containers to be used in our config
+HOST_PROM="prometheus-local"
+HOST_GRAF="grafana-local"
+HOST_TP_EXPORTER="tp-link-plug-exporter-local"
+
+# docker service names
+DOCK_PROJECT_NAME="grafana-tp-link"
+DOCK_SERVICE_PROM="prometheus"
+DOCK_SERVICE_GRAF="grafana"
+DOCK_SERVICE_TP_EXPORTER="tp-link-plug-exporter"
+
+# grafana paths
+GRAF_BASE=/usr/grafana-container-data
+GRAF_CONF=${GRAF_BASE}/config
+GRAF_DATA=${GRAF_BASE}/data
+GRAF_LOG=${GRAF_BASE}/log
+GRAF_CONF_LINK="https://raw.githubusercontent.com/grafana/grafana/master/conf/defaults.ini"
+
+# dashboard file locations
+GRAF_DASH_LINK=""
+GRAF_DASH_FILE="./dash.json"
+
+# place a strong password here
+GRAF_USER="admin"
+GRAF_PASS="astrongpassword__here"
+GRAF_PASS="admin"
+
+GRAF_QUERY_DASH_NAME="power%20usage"
+
+GRAF_API_BASE="localhost:3000/api"
+GRAF_API_DATASOURCES="${GRAF_API_BASE}/datasources"
+GRAF_API_DASHBOARDS="${GRAF_API_BASE}/dashboards"
+
+# prometheus paths
+PROM_BASE=/usr/prometheus-container-data
+PROM_CONF=${PROM_BASE}/config
+PROM_DATA=${PROM_BASE}/data
+PROM_CONF_FILE="prometheus_config.yml"
+
+# curl content type
+CONT_TYPE='Content-Type: application/json;charset=UTF-8'
+
+
+# the tp-link plug ip array (don't have to be ordered!)
+declare -a IP_PLUG_ARRAY=(
+  "${IP_BASE}.56"
+  "${IP_BASE}.54"
+  "${IP_BASE}.93"
+  "${IP_BASE}.111"
+  "${IP_BASE}.131"
+  "${IP_BASE}.214"
+)
+
+# nifty little function to print the plug IP's in a tidy way
+function print_plug_ip() {
+  if [[ ${#} -eq 0 ]]; then
+    echo -e "# IP of your smart plugs"
+  else
+    echo -e "The plug IP's supplied are the following:"
+  fi
+  printf '      - %s\n' "${IP_PLUG_ARRAY[@]}"
+}
+
+# show the IP of the plugs
+cli_info "Configuring prometheus to monitor ${#IP_PLUG_ARRAY[@]} plugs"
+cli_info "$(print_plug_ip 1)"
+
+# now export the prometheus configuration based on the supplied parameters.
+echo -e "
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+
+# scrape the configuration
+scrape_configs:
+  - job_name: 'kasa'
+    static_configs:
+    - targets:
+    $(print_plug_ip)
+    metrics_path: /scrape
+    relabel_configs:
+      - source_labels : [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        # IP of the exporter
+        replacement: ${HOST_TP_EXPORTER}:9233
+
+# scrape kasa_exporter itself
+  - job_name: 'kasa_exporter'
+    static_configs:
+      - targets:
+        - ${HOST_TP_EXPORTER}:9233
+" > ./${PROM_CONF_FILE}
+
+# basic info
+cli_info "User is ${USER_NAME} with id: ${USER_UID}"
+cli_info "Grafana info:"
+cli_info "\t Storing Grafana data: ${GRAF_DATA}"
+cli_info "\t Storing Grafana log: ${GRAF_LOG}"
+cli_info "\t Storing Grafana config: ${GRAF_CONF}"
+
+cli_info "Prometheus info:"
+cli_info "\t Storing Prometheus data: ${PROM_DATA}"
+cli_info "\t Storing Prometheus config: ${PROM_CONF}"
+
+# create the folders while making the user owner the grafana directory
+if ! ret_val=$(sudo mkdir -p {${GRAF_DATA},${GRAF_LOG},${GRAF_CONF}} && \
+sudo chown -R "${USER_NAME}":"${USER_NAME}" ${GRAF_BASE});
+then
+  cli_error "Could not create Grafana directories and/or assign permissions - ret val: ${ret_val}."
+  exit 1
+else
+  cli_info "Created required Grafana directories and assigned permissions for user ${USER_NAME} (id: ${USER_UID})"
+fi
+
+# copy grafana configuration only if it does not exist!
+if [[ ! -f ${GRAF_CONF}/grafana.ini ]]; then
+  cli_info "Copying ${GRAF_CONF_LINK} --> ${GRAF_CONF}/grafana.ini"
+  if ! curl -s ${GRAF_CONF_LINK} --output ${GRAF_CONF}/grafana.ini; then
+    cli_error "Failed to fetch and/or copy Grafana config - exiting."
+    exit 1
+  else
+    cli_info "Copied Grafana successfully!"
+    # also perform the sed to set the (initial) password.
+    sed -i "/admin_password = admin/c\admin_password = ${GRAF_PASS}" ${GRAF_CONF}/grafana.ini
+    cli_warning "Grafana default admin password set - please change it when logging in for the first time!!"
+  fi
+else
+  cli_info "Grafana configuration already exists - not fetching."
+fi
+
+# create the folders while making the user owner the grafana directory
+if ! ret_val=$(sudo mkdir -p {${PROM_DATA},${PROM_CONF}} && \
+sudo chown -R "${USER_NAME}":"${USER_NAME}" ${PROM_BASE}); then
+  cli_error "Could not create Prometheus directories and/or assign permissions -  ret val: ${ret_val}."
+  exit 1
+else
+  cli_info "Created required Prometheus directories and assigned permissions for user ${USER_NAME} (id: ${USER_UID})"
+fi
+
+# copy Prometheus configuration
+cli_info "Copying ${PROM_CONF_FILE} --> ${PROM_CONF}/prometheus.yml"
+if ! cp ./${PROM_CONF_FILE} ${PROM_CONF}/prometheus.yml; then
+  cli_error "Failed to copy Prometheus config - exiting."
+  exit 1
+else
+  cli_info "Copied Prometheus successfully!"
+fi
+
+cli_info "Creating Grafana tp link services dockerfile..."
+
+# create the yaml based on the parameters
+echo -e "
+# Generated automatically from grafana-tp-link script
+version: \"3.7\"
+
+services:
+    # setup grafana
+    ${DOCK_SERVICE_GRAF}:
+      container_name: ${HOST_GRAF}
+      image: grafana/grafana:latest
+      # here you put your user id that owns the directories - 1000 is an example!
+      user: \"${USER_UID}\"
+      # setup grafana volume mounts for persistence.
+      volumes:
+        - \"${GRAF_DATA}:/var/lib/grafana\"
+        - \"${GRAF_LOG}:/var/log/grafana\"
+        - \"${GRAF_CONF}:/etc/grafana\"
+      # this is the default port used by Grafana - if you need to use another, change it.
+      depends_on:
+        - ${DOCK_SERVICE_PROM}
+      ports:
+        - 3000:3000
+      # the service is always restarted unless it is manually stopped.
+      restart: unless-stopped
+
+    # setup prometheus database
+    ${DOCK_SERVICE_PROM}:
+      container_name: ${HOST_PROM}
+      image: prom/prometheus:latest
+      command:
+        - \"--storage.tsdb.retention.time=3y\"
+        - \"--web.enable-lifecycle\"
+        - \"--config.file=/etc/prometheus/prometheus.yml\"
+      user: \"${USER_UID}\"
+      ports:
+        - 9090:9090
+      volumes:
+        - ${PROM_CONF}:/etc/prometheus
+        - ${PROM_DATA}:/prometheus
+      depends_on:
+        - ${DOCK_SERVICE_TP_EXPORTER}
+      restart: unless-stopped
+
+    # setup the tp-link exporter
+    ${DOCK_SERVICE_TP_EXPORTER}:
+      container_name: ${HOST_TP_EXPORTER}
+      image: fffonion/tplink-plug-exporter:latest
+      ports:
+        - 9233:9233
+      # the service is always restarted unless it is manually stopped.
+      restart: unless-stopped
+" > ./${GRAFANA_DOCKERFILE}
+
+cli_info "Exported Grafana dockerfile to ${GRAFANA_DOCKERFILE}"
+
+# now execute the docker-compose using our newly created yaml
+if ! docker-compose -p ${DOCK_PROJECT_NAME} -f ./${GRAFANA_DOCKERFILE} up -d --force-recreate; then
+  cli_error "Could not create Grafana docker service, exiting."
+  exit 1
+else
+  cli_info "Installed grafana docker service successfully."
+fi
+
+##### Install default data source (Prometheus) and assign the Power Meter dashboard
+
+# wrapper function that sets up the prometheus data source and sets it as the default one.
+function setup_prometheus_datasource() {
+  # now, since the endpoint seems alright - try to use the username/pass to access the API
+  req_status=$(curl -s -I -s --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES} 2>/dev/null | head -n 1 | cut -d$' ' -f2)
+  # check the return code of the API - if it is equal to 200, then we can login and register the datasource.
+  if [[ "${req_status}" -ne "200" ]]; then
+    cli_error "The HTTP request code returned was not 200 but rather ${req_status}, indicating an error - skipping grafana config."
+    return 1
+  else
+    cli_info "Grafana API is accessible and can use the supplied credentials to interact."
+    if curl -s --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES} | grep -q "prometheus"; then
+      cli_warning "Seems Prometheus datasource is already present - skipping grafana config."
+    else
+      cli_info "Prometheus data source seems to be missing -- registering"
+      req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES}/ \
+-X POST -H "${CONT_TYPE}" \
+--data-binary "{\"name\":\"Prometheus\", \"isDefault\":true , \"type\":\"prometheus\", \"url\":\"http://${HOST_PROM}:9090\", \"access\":\"proxy\", \"basicAuth\":false}")
+
+       # now check if the data source was added
+      if echo "${req_status}" | grep -q "Datasource added"; then
+        cli_info "Prometheus data source appears to have been added successfully."
+      else
+        cli_error "Could not add Prometheus data source, reason: ${req_status}."
+        return 1
+      fi
+    fi
+  fi
+}
+
+# wrapper function that creates the dashboard and sets it up to be the default one
+function setup_grafana_dashboard() {
+
+  # check if we have a local copy of the dashboard json
+  if [[ ! -f "${GRAF_DASH_FILE}" ]]; then
+    cli_warning "Dashboard json was not found - trying to fetch from remote: ${GRAF_DASH_LINK}"
+    if ! curl -s ${GRAF_DASH_LINK} --output ${GRAF_DASH_FILE}; then
+      cli_error "Could not fetch the dashboard json from remote - cannot continue"
+      return 1
+    else
+      cli_info "Dashboard json definition was fetched successfully at ${GRAF_DASH_FILE}"
+    fi
+  else
+    cli_info "Dashboard json was found at: ${GRAF_DASH_FILE} - using that"
+  fi
+
+  # try to register the grafana dashboard based on the json spec
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X POST "${GRAF_API_DASHBOARDS}/db" \
+-H "${CONT_TYPE}" --data-binary "$(cat < ${GRAF_DASH_FILE})")
+
+  # check if the registration was successful
+  if [[ "$(echo "${req_status}" | jq -r '.status')" == "success" ]]; then
+    cli_info "Grafana dashboard was registered successfully!"
+  elif [[ "$(echo "${req_status}" | jq -r '.status')" == "name-exists" ]]; then
+    cli_warning "Grafana dashboard with the same name already exists - skipping registration"
+  else
+    cli_error "Could not register grafana dashboard... something went wrong -- cannot continue"
+    return 1
+  fi
+
+  # check if the dashboard was successfully registered (and can be queried)
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X GET ${GRAF_API_BASE}/search?query=${GRAF_QUERY_DASH_NAME} \
+-H "${CONT_TYPE}")
+  dash_cnt=$(echo "${req_status}" | jq -r '. | length')
+
+  # check if we have zero (failed registration) or more than one dashboards of the same name
+  if [[ "${dash_cnt}" -ne 1 ]]; then
+    cli_error "Dashboards returned not equal to 1 - something went wrong with inserting; dashboard count: ${dash_cnt}"
+    return 1
+  else
+    cli_info "Returned dashboard count: ${dash_cnt} based on named query for: ${GRAF_QUERY_DASH_NAME}"
+  fi
+
+  # get the dashboard data required to star and make it default
+  dash_uid=$(echo "${req_status}" | jq -r '.[] | .uid')
+  dash_id=$(echo "${req_status}" | jq -r '.[] | .id')
+  dash_starred=$(echo "${req_status}" | jq -r '.[] | .isStarred')
+
+  cli_info "Found Dashboard unique id: ${dash_id} and uid: ${dash_uid}"
+
+  # now, star the dashboard which was just registered for our user
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X POST ${GRAF_API_BASE}/user/stars/dashboard/"${dash_id}"/ \
+-H "${CONT_TYPE}")
+
+  # check if the dashboard has been already starred or if the process was succesful or not
+  if [[ "${dash_starred}" = "true" ]]; then
+    cli_warning "Dashboard already starred - skipping"
+  elif echo "${req_status}" | grep -q "Dashboard starred!"; then
+    cli_info "Dashboard with uid: ${dash_uid} was starred successfully for user ${GRAF_USER}"
+  else
+    cli_error "Dashboard with uid: ${dash_uid} failed to be starred for user ${GRAF_USER} -- cannot continue"
+    return 1
+  fi
+
+  # finally, we have to make it the default dashboard, so once we login is immediately presented
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X PUT "${GRAF_API_BASE}/user/preferences" \
+-H "${CONT_TYPE}" \
+--data-binary "{\"homeDashboardId\": ${dash_id}, \"theme\": \"\", \"timezone\": \"\"}")
+
+  if echo "${req_status}" | grep -q "Preferences updated"; then
+    cli_info "User ${GRAF_USER} preferences updated to make dashboard (with id: ${dash_id}) default"
+  else
+    cli_error "Error updating user preferences to make dashboard (with id: ${dash_id}) default"
+    return 1
+  fi
+}
+
+function setup_grafana() {
+  # now check if we also add prometheus as the data source
+  if [[ ${SETUP_GRAF_SOURCE} = true ]]; then
+    # now add the data source as well as the dashboard
+    cli_info "Trying to add Prometheus data source to Grafana using the API (waiting few seconds first)."
+
+    # first, try to see if the endpoint is alright
+    attempt=1
+    max_attempts=5
+    req_status="$(curl -I localhost:3000 2>/dev/null | head -n 1 | cut -d$' ' -f2)"
+    while [[ -z "${req_status}" ]]; do
+      sleep 2
+      cli_warning "Grafana is not online... trying again... (${attempt} out of ${max_attempts})"
+      req_status="$(curl -I ${GRAF_API_BASE} 2>/dev/null | head -n 1 | cut -d$' ' -f2)"
+
+      if [[ "${attempt}" -ge "${max_attempts}" ]]; then
+        cli_error "Max attempts (${max_attempts}) to wait for Grafana reached - cannot continue..."
+        return 1
+      fi
+      # increment the variable
+      ((attempt=attempt+1))
+    done
+
+    ## Add Prometheus data source
+    if setup_prometheus_datasource; then
+      cli_info "Setting up Prometheus was successful"
+    else
+      cli_error "Error while setting up Prometheus data source... cannot continue"
+      return 1
+    fi
+
+    ## Add Grafana Power Meter Dashboard and make it default
+    if [[ ${SETUP_GRAF_DEFAULT_DASH} = true ]]; then
+      if setup_grafana_dashboard; then
+        cli_info "Setting up the dashboard was successful"
+      else
+        cli_error "Error while creating and registering the grafana dashboard... cannot continue"
+        return 1
+      fi
+    else
+      cli_warning "Set dashboard as the default one was not selected - skipping setting it as default"
+    fi
+
+  else
+    cli_warning "Grafana data source/dashboard configuration was not enabled - please configure it manually."
+  fi
+}
+
+# call the wrapper function
+if setup_grafana; then
+  cli_info "Configured Grafana successfully"
+else
+  cli_error "Encountered an error while registering Grafana dashboard and/or its data source - cannot continue"
+  exit 1
+fi
+
+##### Create and register ufw rule for Grafana
+
+setup_ufw() {
+  # optionally, we can configure ufw to open grafana to our local network.
+  if [[ ${UFW_CONF} = true ]]; then
+    cli_info "Configuring ufw firewall is enabled - proceeding"
+    # output the rule in the ufw application folder - note if rule already exists, skips creation.
+    if [[ -f /etc/ufw/applications.d/${UFW_GRAF_RULENAME} ]]; then
+      cli_warning "ufw Grafana rule file already exists - skipping."
+    else
+        if ! echo -e \
+"[${UFW_GRAF_RULENAME}]
+title=Grafana
+description=Grafana
+ports=3000/tcp
+" | sudo tee -a /etc/ufw/applications.d/${UFW_GRAF_RULENAME} > /dev/null; then
+        cli_error "Failed to output Grafana ufw rule successfully - exiting."
+        return 1
+      else
+        cli_info "ufw Grafana rule file was created successfully!"
+      fi
+    fi
+
+    # now configure the ufw rule
+    if [[ "$(sudo ufw status)" == "Status: inactive" ]]; then
+      cli_warning "ufw is inactive we are not adding the rule in it for now."
+    elif ! sudo ufw status verbose | grep -q ${UFW_GRAF_RULENAME}; then
+      cli_info "ufw rule seems to be missing - trying to add!"
+      if ! sudo ufw allow from ${UFW_SUBNET} to any app ${UFW_GRAF_RULENAME}; then
+        cli_error "Failed to configure ufw rule - exiting!"
+        return 1
+      else
+        cli_info "ufw Grafana rule was applied successfully!"
+      fi
+    else
+      cli_warning "ufw Grafana rule seems to be registered already - skipping!"
+    fi
+  fi
+}
+
+# call thw wrapper function to setup ufw
+if setup_ufw; then
+  cli_info "Configured ufw successfully"
+else
+  cli_error "Encountered an error while registering ufw rule - please do it manually"
+fi
+
+##### Clean up?
+
+# if enabled, remove the files left behind
+if [[ ${CLEAN_UP} = true ]]; then
+    cli_info "Cleaning up is enabled - removing configuration files"
+    rm ./${GRAFANA_DOCKERFILE} ./${PROM_CONF_FILE}
+else
+    cli_warning "Cleaning created files disabled skipping removal -- e.g.: ${GRAFANA_DOCKERFILE}, ${PROM_CONF_FILE}"
+fi
+
+cli_info "Script was executed successfully!"
