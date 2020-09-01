@@ -61,12 +61,11 @@ GRAF_LOG=${GRAF_BASE}/log
 GRAF_CONF_LINK="https://raw.githubusercontent.com/grafana/grafana/master/conf/defaults.ini"
 
 # dashboard file locations
-GRAF_DASH_LINK=""
+GRAF_DASH_LINK="https://raw.githubusercontent.com/andylamp/grafana-tp-link/master/dash.json"
 GRAF_DASH_FILE="./dash.json"
 
 # place a strong password here
 GRAF_USER="admin"
-GRAF_PASS="astrongpassword__here"
 GRAF_PASS="admin"
 
 GRAF_QUERY_DASH_NAME="power%20usage"
