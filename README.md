@@ -119,7 +119,7 @@ function setup_prometheus_datasource() {
   # now, since the endpoint seems alright - try to use the username/pass to access the API
   req_status=$(curl -s -I --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES} 2>/dev/null | \
 head -n 1 | cut -d$' ' -f2)
-  # check the return code of the API - if it is equal to 200, then we can login and register the datasource.
+  # check the return code of the API - if it is 200, then we can login and register the datasource.
   if [[ "${req_status}" -ne "200" ]]; then
     cli_error "The HTTP request code returned was not 200 but rather ${req_status}, indicating an error"
     return 1
