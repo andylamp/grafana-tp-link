@@ -23,7 +23,7 @@ The power meter of choice would be the [TP-Link HS110][3] due to its ability to 
 ## Warning!
 
 All power plugs/appliances have power ratings for the maximum amount of Watts and Amperage that they can handle - please *be careful*.
-These plugs are quite generous in terms of their allowed wattage as they can handle *up to* 16A of current and *up to* 3.5kW.
+These plugs are quite generous in terms of their allowed wattage as they can handle *up to* 16A of current and *up to* 3.5kW (at 240V, less than half of that at 110V).
 This means that they can be used for computers, servers, UPSes and so on... but not for heavy duty devices such as stoves, kitchens, high capacity (>24K BTU) multi-split AC's etc.
 
 # TP-Link exporter container
@@ -117,10 +117,11 @@ datastore with Grafana:
 # wrapper function that sets up the prometheus data source and sets it as the default one.
 function setup_prometheus_datasource() {
   # now, since the endpoint seems alright - try to use the username/pass to access the API
-  req_status=$(curl -s -I --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES} 2>/dev/null | head -n 1 | cut -d$' ' -f2)
+  req_status=$(curl -s -I --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES} 2>/dev/null | \
+head -n 1 | cut -d$' ' -f2)
   # check the return code of the API - if it is equal to 200, then we can login and register the datasource.
   if [[ "${req_status}" -ne "200" ]]; then
-    cli_error "The HTTP request code returned was not 200 but rather ${req_status}, indicating an error - skipping grafana config."
+    cli_error "The HTTP request code returned was not 200 but rather ${req_status}, indicating an error"
     return 1
   else
     cli_info "Grafana API is accessible and can use the supplied credentials to interact."
@@ -130,7 +131,8 @@ function setup_prometheus_datasource() {
       cli_info "Prometheus data source seems to be missing -- registering"
       req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES}/ \
 -X POST -H "${CONT_TYPE}" \
---data-binary "{\"name\":\"Prometheus\", \"isDefault\":true , \"type\":\"prometheus\", \"url\":\"http://${HOST_PROM}:9090\", \"access\":\"proxy\", \"basicAuth\":false}")
+--data-binary "{\"name\":\"Prometheus\", \"isDefault\":true , \
+\"type\":\"prometheus\", \"url\":\"http://${HOST_PROM}:9090\", \"access\":\"proxy\", \"basicAuth\":false}")
 
        # now check if the data source was added
       if echo "${req_status}" | grep -q "Datasource added"; then
@@ -177,7 +179,8 @@ have to `star` is, which can be performed as is shown below:
 
 ```bash
 # now, star the dashboard which was just registered for our user
-req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X POST ${GRAF_API_BASE}/user/stars/dashboard/"${dash_id}"/ \
+req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} \
+-X POST ${GRAF_API_BASE}/user/stars/dashboard/"${dash_id}"/ \
 -H "${CONT_TYPE}")
 
 # check if the dashboard has been already starred or if the process was succesful or not
