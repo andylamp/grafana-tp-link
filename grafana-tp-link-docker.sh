@@ -249,6 +249,17 @@ services:
 
 cli_info "Exported Grafana dockerfile to ${GRAFANA_DOCKERFILE}"
 
+#### Pull the latest version of the required images
+
+if ! docker-compose -f ${GRAFANA_DOCKERFILE} pull; then
+  cli_info "Pulled the required docker images successfully"
+else
+  cli_error "Failed to pull the required docker images - please ensure network connectivity"
+  exit 1
+fi
+
+#### Create the grafana services
+
 # now execute the docker-compose using our newly created yaml
 if ! docker-compose -p ${DOCK_PROJECT_NAME} -f ./${GRAFANA_DOCKERFILE} up -d --force-recreate; then
   cli_error "Could not create Grafana docker service, exiting."

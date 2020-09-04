@@ -327,7 +327,7 @@ within [Kasa app][11].
 [5]: https://github.com/softScheck/tplink-smartplug
 [6]: dash.json
 [7]: grafana-tp-link-docker.sh
-[8]: grafana-remove.sh
+[8]: grafana-tp-link-docker-remove.sh
 [9]: scratch-scripts
 [10]: https://grafana.com/docs/grafana/latest/http_api/
 [11]: https://www.kasasmart.com/us

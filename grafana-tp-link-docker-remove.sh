@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# this is sample script that removes everything and prunes the stopped containers from the system
+# This is script stops, removes, and prunes the containers created using the grafana-tp-link-docker script
+# from the system
 
 # the grafana dockerfile name - this has to be present!
 GRAFANA_DOCKERFILE=grafana.yaml
