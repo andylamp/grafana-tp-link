@@ -52,6 +52,8 @@ DOCK_PROJECT_NAME="grafana-tp-link"
 DOCK_SERVICE_PROM="prometheus"
 DOCK_SERVICE_GRAF="grafana"
 DOCK_SERVICE_TP_EXPORTER="tp-link-plug-exporter"
+# time to wait for docker services to load (in seconds)
+DOCK_WAIT_DURATION=2
 
 # grafana paths
 GRAF_BASE=/usr/grafana-container-data
@@ -387,7 +389,7 @@ function setup_grafana() {
     max_attempts=5
     req_status="$(curl -I localhost:3000 2>/dev/null | head -n 1 | cut -d$' ' -f2)"
     while [[ -z "${req_status}" ]]; do
-      sleep 2
+      sleep ${DOCK_WAIT_DURATION=2}
       cli_warning "Grafana is not online... trying again... (${attempt} out of ${max_attempts})"
       req_status="$(curl -I ${GRAF_API_BASE} 2>/dev/null | head -n 1 | cut -d$' ' -f2)"
 
