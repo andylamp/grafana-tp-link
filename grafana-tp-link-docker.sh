@@ -3,6 +3,8 @@
 # Grafana based Power Monitoring using HS110 Power Plugs
 #
 
+##### Initialisation and preamble
+
 # pretty functions for log output
 function cli_info { echo -e " -- \033[1;32m$1\033[0m" ; }
 function cli_info_read { echo -e -n " -- \e[1;32m$1\e[0m" ; }
@@ -19,6 +21,8 @@ if [[ ! -x "$(command -v jq)" ]] || \
 else
   cli_info "curl, docker-compose, and jq appear to be present."
 fi
+
+##### Variables and setup
 
 # the grafana dockerfile name
 GRAFANA_DOCKERFILE=grafana.yaml
