@@ -152,7 +152,7 @@ This function tries to register the datasource while also checking if we failed 
 ## Registering the Dashboard
 
 The next thing we need to perform is to register the power consumption monitor dashboard into our newly Grafana 
-container, to do so we'll exploit the provided [REST API][10].
+container, to do so we'll exploit the provided [REST API][9].
 
 To register the dashboard (full `json` dashboard definition can be found [here][6]) - we have to perform the following command:
 
@@ -212,6 +212,11 @@ else
   return 1
 fi
 ```
+
+## Extra bits
+
+The scripts that were used to experiment with the Grafana API are included as scratch notes [here][8] in the hops that
+might be of use to somebody; use them at your own peril!
 
 # (Optionally) configure `ufw`
 
@@ -300,22 +305,24 @@ git clone https://github.com/andylamp/grafana-tp-link
 cd grafana-tp-link
 # run the script to install everything
 ./grafana-tp-link.sh
+# alternatively you can use
+./grafana-tp-link.sh -i
 ```
 
-If you need, at some point, to stop the services from running you can run the following [shell script][8] which stops 
- the services and removes the containers -- and **does** delete the stored data and their associated configurations, 
- so be careful!
+If you need, at some point, to stop the services from running you can run the same script with the parameter `-r` 
+which stops the services and removes the containers -- and **does** delete the stored data and their associated 
+configurations, so be careful!
 
 ```bash
 # in the same directory as above, execute:
-./grafana-remove.sh
+./grafana-tp-link.sh -r
 ```
 
 # The end result
 
 This is an indication of what you can expected to view once you get everything working - please note that names, 
 values, and colors might be different in your case as these are dependent on the names and configuration you give 
-within [Kasa app][11].
+within [Kasa app][10].
 
 ![power-dash](assets/power-meter-dashboard-example.jpg)
 
@@ -327,7 +334,6 @@ within [Kasa app][11].
 [5]: https://github.com/softScheck/tplink-smartplug
 [6]: dash.json
 [7]: grafana-tp-link-docker.sh
-[8]: grafana-tp-link-docker-remove.sh
-[9]: scratch-scripts
-[10]: https://grafana.com/docs/grafana/latest/http_api/
-[11]: https://www.kasasmart.com/us
+[8]: scratch-scripts
+[9]: https://grafana.com/docs/grafana/latest/http_api/
+[10]: https://www.kasasmart.com/us

@@ -35,6 +35,9 @@ GRAFANA_DOCKERFILE=grafana.yaml
 
 # delete the files created
 CLEAN_UP=false
+# uninstall flag
+UNINSTALL=false
+
 # setup also the Grafana data source as the prometheus container
 SETUP_GRAF_SOURCE=true
 # select to make the dashboard default
@@ -105,6 +108,43 @@ declare -a IP_PLUG_ARRAY=(
   "${IP_BASE}.131"
   "${IP_BASE}.214"
 )
+
+#### Installation path (install or remove?)
+
+if [[ ${#} -eq 0 ]]; then
+  cli_info "Install procedure selected"
+elif [[ ${#} -eq 1 ]]; then
+  if [[ "${1}" == "-r" ]]; then
+    cli_warning "Uninstall procedure selected"
+    UNINSTALL=true
+  elif [[ "${1}" == "-i" ]]; then
+    cli_warning "Install procedure selected"
+  else
+    cli_error "invalid command argument provided accepted are only -i and -r."
+  fi
+else
+  cli_error "script arguments need to be zero (for install) or exactly one (for remove)"
+  exit 1
+fi
+
+##### Check if we need to uninstall
+
+if [[ ${UNINSTALL} = true ]]; then
+  cli_warning "Uninstalling grafana, prometheus, and removing all data..."
+  if docker-compose -p ${DOCK_PROJECT_NAME} -f ${GRAFANA_DOCKERFILE} down &&
+     docker container prune -f &&
+     # remove the data stored by grafana and prometheus - you might need to change these
+     sudo rm -rf ${GRAF_BASE} ${PROM_BASE}; then
+    cli_warning "Uninstallation completed successfully!"
+    exit 0
+  else
+    cli_error "There was an error while uninstalling..."
+    exit 1
+  fi
+fi
+
+##### Continue with installation
+
 
 # nifty little function to print the plug IP's in a tidy way
 function print_plug_ip() {
@@ -263,7 +303,7 @@ cli_info "Exported Grafana dockerfile to ${GRAFANA_DOCKERFILE}"
 
 #### Pull the latest version of the required images
 
-if ! docker-compose -f ${GRAFANA_DOCKERFILE} pull; then
+if docker-compose -f ${GRAFANA_DOCKERFILE} pull; then
   cli_info "Pulled the required docker images successfully"
 else
   cli_error "Failed to pull the required docker images - please ensure network connectivity"
