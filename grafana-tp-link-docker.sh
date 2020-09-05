@@ -17,14 +17,15 @@ function cli_warning { echo -e " ** \033[1;33m$1\033[0m" ; }
 function cli_warning_read { echo -e -n " ** \e[1;33m$1\e[0m" ; }
 function cli_error { echo -e " !! \033[1;31m$1\033[0m" ; }
 
-# check if we have access to curl, docker-compose, and jq
-if [[ ! -x "$(command -v jq)" ]] || \
+# check if we have access to curl, docker, docker-compose, and jq
+if [[ ! -x "$(command -v curl)" ]] || \
+[[ ! -x "$(command -v docker)" ]] || \
 [[ ! -x "$(command -v docker-compose)" ]] || \
-[[ ! -x "$(command -v curl)" ]]; then
-  cli_error "curl, docker-compose, and jq need to be installed and accessible - cannot continue."
+[[ ! -x "$(command -v jq)" ]]; then
+  cli_error "curl, docker, docker-compose, and jq need to be installed and accessible - cannot continue."
   exit 1
 else
-  cli_info "curl, docker-compose, and jq appear to be present."
+  cli_info "curl, docker, docker-compose, and jq appear to be present."
 fi
 
 ##### Variables and setup
