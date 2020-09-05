@@ -1,6 +1,11 @@
 #!/bin/bash
 
-# Grafana based Power Monitoring using HS110 Power Plugs
+# Grafana based Power Monitoring using HS110 Power Plugs; note: as it's evident from the shebang it was developed
+# (and tested) with bash (only).
+#
+# Author: Andreas Grammenos (ag926@cl.cam.ac.uk)
+#
+# Last touched: 05/09/2020
 #
 
 ##### Initialisation and preamble
