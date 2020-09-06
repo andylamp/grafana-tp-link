@@ -320,7 +320,7 @@ configurations, so be careful!
 
 # The end result
 
-This is an indication of what you can expected to view once you get everything working - please note that names, 
+This is an indication of what you can expect to view once you get everything working - please note that names, 
 values, and colors might be different in your case as these are dependent on the names and configuration you give 
 within [Kasa app][10].
 
