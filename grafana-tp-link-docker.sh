@@ -45,7 +45,7 @@ SETUP_GRAF_DEFAULT_DASH=true
 
 # configure ufw for grafana flag - only configures it if true
 UFW_CONF=true
-# configure the local subnet
+# the local subnet - please configure accordingly
 IP_BASE="10.10.1"
 UFW_SUBNET="${IP_BASE}.0/24"
 # the rule name
