@@ -266,7 +266,7 @@ fi
 
 ### Extra bits
 
-The scripts that were used to experiment with the Grafana API are included as scratch notes [here][8] in the hops that
+The scripts that were used to experiment with the Grafana API are included as scratch notes [here][8] hopping that
 might be of use to somebody; use them at your own peril!
 
 ## (Optionally) configure `ufw`
