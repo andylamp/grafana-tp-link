@@ -26,7 +26,58 @@ All power plugs/appliances have power ratings for the maximum amount of Watts an
 These plugs are quite generous in terms of their allowed wattage as they can handle *up to* 16A of current and *up to* 3.5kW (at 240V, less than half of that at 110V).
 This means that they can be used for computers, servers, UPSes and so on... but not for heavy duty devices such as stoves, kitchens, high capacity (>24K BTU) multi-split AC's etc.
 
-# TP-Link exporter container
+# Installation
+
+As detailed below, there are quite a few steps for installation. The following [shell script][7] is designed to simplify this.
+
+This script includes both **installing** and **updating** as you basically invoke the *same* script with no parameters.
+
+To run it, you can do the following:
+
+```bash
+# clone this repository
+git clone https://github.com/andylamp/grafana-tp-link
+# enter this directory
+cd grafana-tp-link
+# run the script to install everything
+./grafana-tp-link.sh
+# alternatively you can use
+./grafana-tp-link.sh -i
+```
+
+If you need, at some point, to stop the services from running you can run the same script with the parameter `-r` 
+which stops the services and removes the containers -- and **does** delete the stored data and their associated 
+configurations, so be careful!
+
+```bash
+# in the same directory as above, execute:
+./grafana-tp-link.sh -r
+```
+
+
+## The result
+
+This is what you can expect to see once installed - please note that names, 
+values, and colors might be different in your case as these are dependent on the names and configuration you give 
+within [Kasa app][10].
+
+![power-dash](assets/power-meter-dashboard-example.jpg)
+
+
+[1]: https://grafana.com/
+[2]: https://prometheus.io/
+[3]: https://www.tp-link.com/gr/home-networking/smart-plug/hs110/
+[4]: https://github.com/fffonion/tplink-plug-exporter
+[5]: https://github.com/softScheck/tplink-smartplug
+[6]: dash.json
+[7]: grafana-tp-link-docker.sh
+[8]: scratch-scripts
+[9]: https://grafana.com/docs/grafana/latest/http_api/
+[10]: https://www.kasasmart.com/us
+
+# Explanation
+
+## TP-Link exporter container
 
 The first thing we need to configure is the HS110 exporter container, as mentioned previously we'll be using the one 
 provided from [here][4]. The following `yaml` creates the requested docker service.
@@ -41,7 +92,7 @@ tp-link-plug-exporter:
   restart: unless-stopped
 ```
 
-# Prometheus container
+## Prometheus container
 
 This is a neat solution for tracking measurements over time, it has much more powerful capabilities than the ones we're exploiting 
 in this tiny tool. To start a Prometheus container with *persistence* (i.e.: meaning our measurements will be stored) we can do the following:
@@ -76,7 +127,7 @@ but also explicitly tell the Prometheus its location.
 Finally, please note that in order for everything to work we need to start the container using the ID of the user the 
 bound volume mounts belong to (in this case, me) - otherwise, it won't work. 
 
-# Grafana container
+## Grafana container
 
 To setup, we will use the following `Dockerfile` which creates an image based on the pre-existing latest grafana 
 version while also setting up bind volumes; meaning that we'll also need to create the appropriate folders on our machine.
@@ -107,7 +158,7 @@ Please note that this service is dependent on Prometheus (which in turn is depen
 However, if we want to have the power meter dashboard operational from the get-go we have to perform a little bit
 of hacking in order to get everything sorted.
 
-## Registering the datasource (Prometheus)
+### Registering the datasource (Prometheus)
 
 Initially, in order to use any of the dashboards we have to link Grafana with a datasource, in our case this is our
 newly created Prometheus container; hence, exploiting `curl` we can perform the following command to register the 
@@ -149,7 +200,7 @@ head -n 1 | cut -d$' ' -f2)
 This function tries to register the datasource while also checking if we failed or if the datasource we are trying to add 
 (Prometheus) is already registered.
 
-## Registering the Dashboard
+### Registering the Dashboard
 
 The next thing we need to perform is to register the power consumption monitor dashboard into our newly Grafana 
 container, to do so we'll exploit the provided [REST API][9].
@@ -172,7 +223,7 @@ else
 fi
 ```
 
-## Starring the Dashboard
+### Starring the Dashboard
 
 Following the registration of our dashboard before being able to set it as the default for our current user we 
 have to `star` is, which can be performed as is shown below:
@@ -194,7 +245,7 @@ else
 fi
 ```
 
-## Making the Dashboard default
+### Making the Dashboard default
 
 The final bit of the long puzzle is to make the newly created dashboard the default one, meaning that when logging
 in the first thing presented would be this dashboard.
@@ -213,12 +264,12 @@ else
 fi
 ```
 
-## Extra bits
+### Extra bits
 
 The scripts that were used to experiment with the Grafana API are included as scratch notes [here][8] in the hops that
 might be of use to somebody; use them at your own peril!
 
-# (Optionally) configure `ufw`
+## (Optionally) configure `ufw`
 
 In order to be able to access the Grafana dashboard through our wider local network then we'd need to configure 
 our firewall to allow these ports for outside communication; in my case, I am mostly using `ufw`, so if your 
@@ -289,51 +340,3 @@ ports=3000/tcp
   fi
 }
 ```
-
-# Putting everything together
-
-However, this can become tedious and error prone when doing all these commands by hand; the following [shell script][7] 
-is designed to make this automatically :) - this is includes both **installing** and **updating** as you basically 
-invoke the *same* script with no parameters.
-
-To run it, you can do the following:
-
-```bash
-# clone this repository
-git clone https://github.com/andylamp/grafana-tp-link
-# enter this directory
-cd grafana-tp-link
-# run the script to install everything
-./grafana-tp-link.sh
-# alternatively you can use
-./grafana-tp-link.sh -i
-```
-
-If you need, at some point, to stop the services from running you can run the same script with the parameter `-r` 
-which stops the services and removes the containers -- and **does** delete the stored data and their associated 
-configurations, so be careful!
-
-```bash
-# in the same directory as above, execute:
-./grafana-tp-link.sh -r
-```
-
-# The end result
-
-This is an indication of what you can expect to view once you get everything working - please note that names, 
-values, and colors might be different in your case as these are dependent on the names and configuration you give 
-within [Kasa app][10].
-
-![power-dash](assets/power-meter-dashboard-example.jpg)
-
-
-[1]: https://grafana.com/
-[2]: https://prometheus.io/
-[3]: https://www.tp-link.com/gr/home-networking/smart-plug/hs110/
-[4]: https://github.com/fffonion/tplink-plug-exporter
-[5]: https://github.com/softScheck/tplink-smartplug
-[6]: dash.json
-[7]: grafana-tp-link-docker.sh
-[8]: scratch-scripts
-[9]: https://grafana.com/docs/grafana/latest/http_api/
-[10]: https://www.kasasmart.com/us
