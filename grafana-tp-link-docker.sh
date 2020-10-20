@@ -101,6 +101,7 @@ CONT_TYPE='Content-Type: application/json;charset=UTF-8'
 
 # the tp-link plug ip array (does not have to be ordered!)
 declare -a IP_PLUG_ARRAY=(
+  "${IP_BASE}.31"
   "${IP_BASE}.56"
   "${IP_BASE}.54"
   "${IP_BASE}.93"
