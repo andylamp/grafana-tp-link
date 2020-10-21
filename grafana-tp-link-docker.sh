@@ -313,7 +313,7 @@ fi
 
 #### Try to remove existing containers so we can replace them
 
-if docker rm --force "${DOCK_SERVICE_PROM}" "${DOCK_SERVICE_GRAF}" "${DOCK_SERVICE_TP_EXPORTER}"; then
+if docker rm --force "${HOST_GRAF}" "${HOST_PROM}" "${HOST_TP_EXPORTER}"; then
   cli_info "Removed previous container images successfully"
 else
   cli_error "There was an error while removing the containers... - please checks logs"
