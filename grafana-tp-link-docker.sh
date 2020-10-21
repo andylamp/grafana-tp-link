@@ -311,6 +311,15 @@ else
   exit 1
 fi
 
+#### Try to remove existing containers so we can replace them
+
+if docker rm --force "${DOCK_SERVICE_PROM}" "${DOCK_SERVICE_GRAF}" "${DOCK_SERVICE_TP_EXPORTER}"; then
+  cli_info "Removed previous container images successfully"
+else
+  cli_error "There was an error while removing the containers... - please checks logs"
+  exit 1
+fi
+
 #### Create the grafana services
 
 # now execute the docker-compose using our newly created yaml
@@ -451,6 +460,8 @@ function setup_grafana() {
       # increment the variable
       ((attempt=attempt+1))
     done
+
+    cli_info "Grafana is online after ${attempt} attempts..."
 
     ## Add Prometheus data source
     if setup_prometheus_datasource; then
