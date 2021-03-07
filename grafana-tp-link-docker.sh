@@ -68,8 +68,11 @@ DOCK_SERVICE_TP_EXPORTER="tp-link-plug-exporter"
 # time to wait for docker services to load (in seconds)
 DOCK_WAIT_DURATION=2
 
+# NOTE: Please change this - will not be the same in your system!
+BASE_PATH="/gavatha/container-data"
+
 # grafana paths
-GRAF_BASE=/usr/grafana-container-data
+GRAF_BASE=${BASE_PATH}/grafana-data
 GRAF_CONF=${GRAF_BASE}/config
 GRAF_DATA=${GRAF_BASE}/data
 GRAF_LOG=${GRAF_BASE}/log
@@ -90,7 +93,7 @@ GRAF_API_DATASOURCES="${GRAF_API_BASE}/datasources"
 GRAF_API_DASHBOARDS="${GRAF_API_BASE}/dashboards"
 
 # prometheus paths
-PROM_BASE=/usr/prometheus-container-data
+PROM_BASE=${BASE_PATH}/prometheus-data
 PROM_CONF=${PROM_BASE}/config
 PROM_DATA=${PROM_BASE}/data
 PROM_CONF_FILE="prometheus_config.yml"
