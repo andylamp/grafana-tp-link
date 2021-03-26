@@ -40,9 +40,9 @@ git clone https://github.com/andylamp/grafana-tp-link
 # enter this directory
 cd grafana-tp-link
 # run the script to install everything
-./grafana-tp-link.sh
+./grafana-tp-link
 # alternatively you can use
-./grafana-tp-link.sh -i
+./grafana-tp-link -i
 ```
 
 If you need, at some point, to stop the services from running you can run the same script with the parameter `-r` 
@@ -51,7 +51,7 @@ configurations, so be careful!
 
 ```bash
 # in the same directory as above, execute:
-./grafana-tp-link.sh -r
+./grafana-tp-link -r
 ```
 
 
@@ -203,7 +203,7 @@ This function tries to register the datasource while also checking if we failed 
 ### Registering the Dashboard
 
 The next thing we need to perform is to register the power consumption monitor dashboard into our newly Grafana 
-container, to do so we'll exploit the provided [REST API][9].
+container; to do so, we'll exploit the provided [REST API][9].
 
 To register the dashboard (full `json` dashboard definition can be found [here][6]) - we have to perform the following command:
 
@@ -276,7 +276,7 @@ our firewall to allow these ports for outside communication; in my case, I am mo
 firewall differs please follow its respective manual to open the required ports.
 
 There are different ways to configure the ports but personally the way I like to do this is to create individual 
-rules in `ufw` for each application I want to allow/block and just apply them - this is also a bit more tidier in case 
+rules in `ufw` for each application I want to allow/block and just apply them - this is also a bit tidier in case 
 you want to see what's going on when using `ufw status verbose`. An example of a rule for `Grafana` is the following:
 
 ```
