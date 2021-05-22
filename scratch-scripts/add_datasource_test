@@ -23,16 +23,16 @@ echo -en "\nStatus is: ${req_status}\n\n"
 
 if [[ "${delete_op}" -eq "0" ]]; then
 
-	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES}/name/Prometheus/ \
-		-X DELETE -H 'Content-Type: application/json;charset=UTF-8')
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES}/name/Prometheus/ \
+    -X DELETE -H 'Content-Type: application/json;charset=UTF-8')
 
-	echo "Response was: {$req_status}"
+  echo "Response was: {$req_status}"
 
 elif [[ "${delete_op}" -eq "1" ]]; then
 
-	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES}/ \
-		-X POST -H 'Content-Type: application/json;charset=UTF-8' \
-		--data-binary "{\"name\":\"Prometheus\", \"isDefault\":true , \"type\":\"prometheus\", \"url\":\"http://${HOST_PROM}:9090\", \"access\":\"proxy\", \"basicAuth\":false}")
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES}/ \
+    -X POST -H 'Content-Type: application/json;charset=UTF-8' \
+    --data-binary "{\"name\":\"Prometheus\", \"isDefault\":true , \"type\":\"prometheus\", \"url\":\"http://${HOST_PROM}:9090\", \"access\":\"proxy\", \"basicAuth\":false}")
 
-	echo "Response was: {$req_status}"
+  echo "Response was: {$req_status}"
 fi

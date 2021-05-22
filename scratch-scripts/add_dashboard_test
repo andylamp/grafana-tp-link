@@ -36,78 +36,78 @@ delete_op=1
 
 if [[ "${delete_op}" -eq "0" ]]; then
 
-	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X GET ${GRAF_API_BASE}/search?query=power%20usage \
-		-H "Content-Type: application/json")
-	dash_cnt=$(echo "${req_status}" | jq -r '. | length')
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X GET ${GRAF_API_BASE}/search?query=power%20usage \
+    -H "Content-Type: application/json")
+  dash_cnt=$(echo "${req_status}" | jq -r '. | length')
 
-	echo -en "Returned dashboard count: ${dash_cnt}\n\n"
+  echo -en "Returned dashboard count: ${dash_cnt}\n\n"
 
-	if [[ "${dash_cnt}" -ne 1 ]]; then
-		echo "error, dashboards returned not equal to 1 - cannot delete; dashboard count: ${dash_cnt}"
-		exit 1
-	fi
+  if [[ "${dash_cnt}" -ne 1 ]]; then
+    echo "error, dashboards returned not equal to 1 - cannot delete; dashboard count: ${dash_cnt}"
+    exit 1
+  fi
 
-	dash_uid=$(echo "${req_status}" | jq -r '.[] | .uid')
+  dash_uid=$(echo "${req_status}" | jq -r '.[] | .uid')
 
-	echo -en "uid is: ${dash_uid}\n\n"
+  echo -en "uid is: ${dash_uid}\n\n"
 
-	# exit 1
+  # exit 1
 
-	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} "${GRAF_API_DASHBOARDS}/uid/${dash_uid}" \
-		-X DELETE -H 'Content-Type: application/json;charset=UTF-8')
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} "${GRAF_API_DASHBOARDS}/uid/${dash_uid}" \
+    -X DELETE -H 'Content-Type: application/json;charset=UTF-8')
 
-	echo -en "\nStatus is: ${req_status}\n\n"
+  echo -en "\nStatus is: ${req_status}\n\n"
 
 elif [[ "${delete_op}" -eq "1" ]]; then
 
-	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} --request "POST" ${GRAF_API_DASHBOARDS}/db \
-		--header "Content-Type: application/json" --data-binary "$(cat <./dash.json)") # --write-out '%{http_code}'
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} --request "POST" ${GRAF_API_DASHBOARDS}/db \
+    --header "Content-Type: application/json" --data-binary "$(cat <./dash.json)") # --write-out '%{http_code}'
 
-	dash_register=$(echo "${req_status}" | jq -r '.status')
+  dash_register=$(echo "${req_status}" | jq -r '.status')
 
-	echo -en "Return code was: ${dash_register}"
+  echo -en "Return code was: ${dash_register}"
 
-	echo -en "\nStatus is: ${req_status}\n\n"
+  echo -en "\nStatus is: ${req_status}\n\n"
 
-	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X GET ${GRAF_API_BASE}/search?query=power%20usage \
-		-H "Content-Type: application/json")
-	dash_cnt=$(echo "${req_status}" | jq -r '. | length')
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X GET ${GRAF_API_BASE}/search?query=power%20usage \
+    -H "Content-Type: application/json")
+  dash_cnt=$(echo "${req_status}" | jq -r '. | length')
 
-	echo -en "Returned dashboard count: ${dash_cnt}\n\n"
+  echo -en "Returned dashboard count: ${dash_cnt}\n\n"
 
-	if [[ "${dash_cnt}" -ne 1 ]]; then
-		echo "error, dashboards returned not equal to 1 - something went wrong with inserting; dashboard count: ${dash_cnt}"
-		exit 1
-	fi
+  if [[ "${dash_cnt}" -ne 1 ]]; then
+    echo "error, dashboards returned not equal to 1 - something went wrong with inserting; dashboard count: ${dash_cnt}"
+    exit 1
+  fi
 
-	dash_uid=$(echo "${req_status}" | jq -r '.[] | .uid')
-	dash_id=$(echo "${req_status}" | jq -r '.[] | .id')
+  dash_uid=$(echo "${req_status}" | jq -r '.[] | .uid')
+  dash_id=$(echo "${req_status}" | jq -r '.[] | .id')
 
-	echo -en "uid is: ${dash_uid}\nid: ${dash_id}\n\n"
+  echo -en "uid is: ${dash_uid}\nid: ${dash_id}\n\n"
 
-	# star the dashboard which was just inserted
-	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X POST ${GRAF_API_BASE}/user/stars/dashboard/"${dash_id}"/ \
-		-H "Content-Type: application/json")
+  # star the dashboard which was just inserted
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X POST ${GRAF_API_BASE}/user/stars/dashboard/"${dash_id}"/ \
+    -H "Content-Type: application/json")
 
-	echo -en "\n\n This: \n${req_status}\n\n"
+  echo -en "\n\n This: \n${req_status}\n\n"
 
-	if echo "${req_status}" | grep -q "Dashboard starred!"; then
-		echo -en "Dashboard Starred\n\n"
-	else
-		echo "error starring!"
-		exit 1
-	fi
+  if echo "${req_status}" | grep -q "Dashboard starred!"; then
+    echo -en "Dashboard Starred\n\n"
+  else
+    echo "error starring!"
+    exit 1
+  fi
 
-	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X PUT "${GRAF_API_BASE}/user/preferences" \
-		-H 'Content-Type: application/json;charset=UTF-8' \
-		--data-binary "{\"homeDashboardId\": ${dash_id}, \"theme\": \"\", \"timezone\": \"\"}")
+  req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X PUT "${GRAF_API_BASE}/user/preferences" \
+    -H 'Content-Type: application/json;charset=UTF-8' \
+    --data-binary "{\"homeDashboardId\": ${dash_id}, \"theme\": \"\", \"timezone\": \"\"}")
 
-	if echo "${req_status}" | grep -q "Preferences updated"; then
-		echo -en "Dashboard set as the default one\n\n"
-	else
-		echo "error starring!"
-		exit 1
-	fi
+  if echo "${req_status}" | grep -q "Preferences updated"; then
+    echo -en "Dashboard set as the default one\n\n"
+  else
+    echo "error starring!"
+    exit 1
+  fi
 fi
 
 #

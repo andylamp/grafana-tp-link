@@ -18,3 +18,4 @@ repos:
       - id: shellcheck
         additional_dependencies: []
       - id: shfmt
+        args: [ -i 2 ]
