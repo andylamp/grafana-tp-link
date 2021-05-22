@@ -8,6 +8,9 @@ repos:
     hooks:
       - id: fasterer
       - id: forbid-binary
+        types: ['binary']
+        exclude: >
+          (?x)^(assets/power-meter-dashboard-example.jpg)$
       - id: git-check  # Configure in .gitattributes
       - id: markdownlint # Configure in .mdlrc
       - id: script-must-have-extension

@@ -3,34 +3,37 @@
 # Power monitor using Grafana and TP-Link HS110 Plugs
 
 This project came to be as I wanted to monitor my appliance power consumption over time; however, this supposedly
-easy task was harder than I thought as, until fairly recently, there were no *affordable* reliable high current power 
-plugs that I could buy. Thankfully, I discovered [TP-Link HS110][3] which were a match made in heaven as their protocol 
-was reverse engineered meaning I could use mature, open source tools to do the monitoring. To that end, I elected to 
-use [Grafana][1] which is a nifty little tool that can be used to monitor various signals that come out of your 
-infrastructure - in my use case, power consumption. 
+easy task was harder than I thought as, until fairly recently, there were no *affordable* reliable high current power
+plugs that I could buy. Thankfully, I discovered [TP-Link HS110][3] which were a match made in heaven as their protocol
+was reverse engineered meaning I could use mature, open source tools to do the monitoring. To that end, I elected to
+use [Grafana][1] which is a nifty little tool that can be used to monitor various signals that come out of your
+infrastructure - in my use case, power consumption.
 
-The steps to do this are the following:
+The steps to take to achieve this are the following:
 
  1. Setup [Grafana][1], [Prometheus][2], and [tp-link exporter][4] as a docker services.
- 3. Install a Grafana dashboard which ingests and displays the required metrics.
- 4. (Optionally) Configure `ufw` to allow access from the local network.
+ 1. Install a Grafana dashboard which ingests and displays the required metrics.
+ 1. (Optionally) Configure `ufw` to allow access from the local network.
 
 # Power meter (HS110)
 
 The power meter of choice would be the [TP-Link HS110][3] due to its ability to be used for this purpose using the
- exporter provided [here][4]; this was made possible due to the (awesome) reverse engineering of the used protocol, 
- if you fancy a good read you can read more about this [here][5]. Another, added bonus, is that they are 
- quite affordable at about 24 € per piece.
- 
-## Warning!
+exporter provided [here][4]; this was made possible due to the (awesome) reverse engineering of the used protocol,
+if you fancy a good read you can read more about this [here][5]. Another, added bonus, is that they are
+quite affordable at about 24 € per piece.
 
-All power plugs/appliances have power ratings for the maximum amount of Watts and Amperage that they can handle - please *be careful*.
-These plugs are quite generous in terms of their allowed wattage as they can handle *up to* 16A of current and *up to* 3.5kW (at 240V, less than half of that at 110V).
-This means that they can be used for computers, servers, UPSes and so on... but not for heavy duty devices such as stoves, kitchens, high capacity (>24K BTU) multi-split AC's etc.
+## Warning
+
+All power plugs/appliances have power ratings for the maximum amount of Watts and Amperage that they can handle -
+please *be careful*. These plugs are quite generous in terms of their allowed wattage as they can handle *up to* 16A of
+current and *up to* 3.5kW (at 240V, less than half of that at 110V). This means that they can be used for computers,
+servers, UPSes and so on... but not for heavy-duty devices such as stoves, kitchens, high capacity (>24K BTU)
+multi-split AC's etc.
 
 # Installation
 
-As detailed below, there are quite a few steps for installation. The following [shell script][7] is designed to simplify this.
+As detailed below, there are quite a few steps for installation. The following [shell script][7] is designed to
+simplify this.
 
 This script includes both **installing** and **updating** as you basically invoke the *same* script with no parameters.
 
@@ -47,8 +50,8 @@ cd grafana-tp-link
 ./grafana-tp-link -i
 ```
 
-If you need, at some point, to stop the services from running you can run the same script with the parameter `-r` 
-which stops the services and removes the containers -- and **does** delete the stored data and their associated 
+If you need, at some point, to stop the services from running you can run the same script with the parameter `-r`
+which stops the services and removes the containers -- and **does** delete the stored data, and their associated
 configurations, so be careful!
 
 ```bash
@@ -56,32 +59,18 @@ configurations, so be careful!
 ./grafana-tp-link -r
 ```
 
-
 ## The result
 
-This is what you can expect to see once installed - please note that names, 
-values, and colors might be different in your case as these are dependent on the names and configuration you give 
-within [Kasa app][10].
+This is what you can expect to see once installed - please note that names, values, and colors might be different in
+your case as these are dependent on the names and configuration you give within [Kasa app][10].
 
 ![power-dash](assets/power-meter-dashboard-example.jpg)
-
-
-[1]: https://grafana.com/
-[2]: https://prometheus.io/
-[3]: https://www.tp-link.com/gr/home-networking/smart-plug/hs110/
-[4]: https://github.com/fffonion/tplink-plug-exporter
-[5]: https://github.com/softScheck/tplink-smartplug
-[6]: dash.json
-[7]: grafana-tp-link-docker.sh
-[8]: scratch-scripts
-[9]: https://grafana.com/docs/grafana/latest/http_api/
-[10]: https://www.kasasmart.com/us
 
 # Explanation
 
 ## TP-Link exporter container
 
-The first thing we need to configure is the HS110 exporter container, as mentioned previously we'll be using the one 
+The first thing we need to configure is the HS110 exporter container, as mentioned previously we'll be using the one
 provided from [here][4]. The following `yaml` creates the requested docker service.
 
 ```yaml
@@ -96,8 +85,10 @@ tp-link-plug-exporter:
 
 ## Prometheus container
 
-This is a neat solution for tracking measurements over time, it has much more powerful capabilities than the ones we're exploiting 
-in this tiny tool. To start a Prometheus container with *persistence* (i.e.: meaning our measurements will be stored) we can do the following:
+This is a neat solution for tracking measurements over time, it has much more powerful capabilities than the ones
+we're exploiting in this tiny tool. To start a Prometheus container with *persistence* (i.e.: meaning our measurements
+will be stored) we can do the following:
+
 ```yaml
 prometheus:
   container_name: prometheus-local
@@ -117,22 +108,23 @@ prometheus:
   restart: unless-stopped
 ```
 
-An interesting point is that the default measurements are not kept for long (due to space constraints). 
-However, I'd like to keep my data a little longer as space is not really an issue for the volume of data that I am 
-dealing with, hence by using the flag `--storage.tsdb.retention.time=3y` we tell Prometheus to keep the values 
-for 3 years.
+An interesting point is that the default measurements are not kept for long (due to space constraints).
+However, I'd like to keep my data a little longer as space is not really an issue for the volume of data that I am
+dealing with, hence by using the flag `--storage.tsdb.retention.time=3y` we tell `Prometheus` to keep the values for
+3 years.
 
-Another interesting bit is that we have to explicitly state where the config file resides as when we create the bind 
-volume for `/etc/prometheus` its not populated with anything and thus we not only have to copy our configuration file 
+Another interesting bit is that we have to explicitly state where the config file resides as when we create the bind
+volume for `/etc/prometheus` it's not populated with anything and thus we not only have to copy our configuration file
 but also explicitly tell the Prometheus its location.
 
-Finally, please note that in order for everything to work we need to start the container using the ID of the user the 
-bound volume mounts belong to (in this case, me) - otherwise, it won't work. 
+Finally, please note that in order for everything to work we need to start the container using the ID of the user the
+bound volume mounts belong to (in this case, me) - otherwise, it won't work.
 
 ## Grafana container
 
-To setup, we will use the following `Dockerfile` which creates an image based on the pre-existing latest grafana 
-version while also setting up bind volumes; meaning that we'll also need to create the appropriate folders on our machine.
+To create and configure our Grafana container, we will use the following `Dockerfile` which creates an image based on
+the pre-existing (latest) Grafana version while also setting up bind volumes. This means that we'll also need to create
+the appropriate folders on our machine where the data will be stored.
 
 We first start by defining the `yaml` file we want to use - the full dockerfile is shown below.
 
@@ -163,7 +155,7 @@ of hacking in order to get everything sorted.
 ### Registering the datasource (Prometheus)
 
 Initially, in order to use any of the dashboards we have to link Grafana with a datasource, in our case this is our
-newly created Prometheus container; hence, exploiting `curl` we can perform the following command to register the 
+newly created Prometheus container; hence, exploiting `curl` we can perform the following command to register the
 datastore with Grafana:
 
 ```bash
@@ -199,15 +191,16 @@ head -n 1 | cut -d$' ' -f2)
 }
 ```
 
-This function tries to register the datasource while also checking if we failed or if the datasource we are trying to add 
-(Prometheus) is already registered.
+This function tries to register the datasource while also checking if we failed or if the datasource we are trying to
+add (`Prometheus`) is already registered.
 
 ### Registering the Dashboard
 
-The next thing we need to perform is to register the power consumption monitor dashboard into our newly Grafana 
+The next thing we need to perform is to register the power consumption monitor dashboard into our newly Grafana
 container; to do so, we'll exploit the provided [REST API][9].
 
-To register the dashboard (full `json` dashboard definition can be found [here][6]) - we have to perform the following command:
+To register the dashboard (full `json` dashboard definition can be found [here][6]) - we have to perform the
+following command:
 
 ```bash
 # try to register the grafana dashboard based on the json spec
@@ -227,8 +220,8 @@ fi
 
 ### Starring the Dashboard
 
-Following the registration of our dashboard before being able to set it as the default for our current user we 
-have to `star` is, which can be performed as is shown below:
+Following the registration of our dashboard before being able to set it as the default for our current user we have
+to `star` is, which can be performed as is shown below:
 
 ```bash
 # now, star the dashboard which was just registered for our user
@@ -273,23 +266,23 @@ might be of use to somebody; use them at your own peril!
 
 ## (Optionally) configure `ufw`
 
-In order to be able to access the Grafana dashboard through our wider local network then we'd need to configure 
-our firewall to allow these ports for outside communication; in my case, I am mostly using `ufw`, so if your 
-firewall differs please follow its respective manual to open the required ports.
+In order to be able to access the Grafana dashboard through our wider local network then we'd need to configure our
+firewall to allow these ports for outside communication; in my case, I am mostly using `ufw`, so if your firewall
+differs please follow its respective manual to open the required ports.
 
-There are different ways to configure the ports but personally the way I like to do this is to create individual 
-rules in `ufw` for each application I want to allow/block and just apply them - this is also a bit tidier in case 
-you want to see what's going on when using `ufw status verbose`. An example of a rule for `Grafana` is the following:
+There are different ways to configure the ports but personally the way I like to do this is to create individual rules
+in `ufw` for each application I want to allow/block and just apply them - this is also a bit tidier in case you want to
+see what's going on when using `ufw status verbose`. An example of a rule for `Grafana` is the following:
 
-```
+```text
 [grafana]
 title=Grafana
 description=Grafana
 ports=3000/tcp
 ```
 
-The rules are normally placed in `/etc/ufw/applications.d/`, which is where I've put this as well. 
-Please note that they *do not* require any type of extension; for example the above rule would be placed using:
+The rules are normally placed in `/etc/ufw/applications.d/`, which is where I've put this as well. Please note that
+they *do not* require any type of extension; for example the above rule would be placed using:
 
 ```bash
 sudo echo -e \
@@ -300,7 +293,7 @@ ports=3000/tcp
 " > /etc/ufw/applications.d/grafana
 ```
 
-Now to register, we could use the following segment, which both checks if the rule is already registered and reports 
+Now to register, we could use the following segment, which both checks if the rule is already registered and reports
 any failures.
 
 ```bash
@@ -342,3 +335,14 @@ ports=3000/tcp
   fi
 }
 ```
+
+[1]: https://grafana.com/
+[2]: https://prometheus.io/
+[3]: https://www.tp-link.com/gr/home-networking/smart-plug/hs110/
+[4]: https://github.com/fffonion/tplink-plug-exporter
+[5]: https://github.com/softScheck/tplink-smartplug
+[6]: dash.json
+[7]: grafana-tp-link-docker
+[8]: scratch-scripts
+[9]: https://grafana.com/docs/grafana/latest/http_api/
+[10]: https://www.kasasmart.com/us

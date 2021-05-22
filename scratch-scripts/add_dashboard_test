@@ -1,0 +1,124 @@
+#!/bin/bash
+
+# This is the file where I performed the add dashboard experiments - might be useful to some.
+
+GRAF_USER="admin"
+GRAF_PASS="admin"
+
+GRAF_API_BASE="localhost:3000/api"
+GRAF_API_DASHBOARDS="${GRAF_API_BASE}/dashboards"
+
+#curl -I --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DASHBOARDS}
+
+#req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X GET ${GRAF_API_BASE}/search?query=power%20usage \
+#-H "Content-Type: application/json")
+#
+#echo -en "${req_status}\n\n"
+#
+#echo -en "Returned dashboard count: $(echo "${req_status}" | jq -r '. | length')\n\n"
+#
+#echo -en "uid is: $(echo "${req_status}" | jq -r '.[] | .uid')\n\n"
+#
+#exit 1
+
+# cat ./dash.json
+
+# ff="$(cat <./dash.json)"
+
+# echo "${ff}"
+
+#delete_op=0
+delete_op=1
+#delete_op=2
+
+# test output filtering using jq
+# echo '{"id":1,"slug":"power-usage","status":"success","uid":"4sxi31NGk","url":"/d/4sxi31NGk/power-usage","version":1}' | jq -r '.uid'
+
+if [[ "${delete_op}" -eq "0" ]]; then
+
+	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X GET ${GRAF_API_BASE}/search?query=power%20usage \
+		-H "Content-Type: application/json")
+	dash_cnt=$(echo "${req_status}" | jq -r '. | length')
+
+	echo -en "Returned dashboard count: ${dash_cnt}\n\n"
+
+	if [[ "${dash_cnt}" -ne 1 ]]; then
+		echo "error, dashboards returned not equal to 1 - cannot delete; dashboard count: ${dash_cnt}"
+		exit 1
+	fi
+
+	dash_uid=$(echo "${req_status}" | jq -r '.[] | .uid')
+
+	echo -en "uid is: ${dash_uid}\n\n"
+
+	# exit 1
+
+	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} "${GRAF_API_DASHBOARDS}/uid/${dash_uid}" \
+		-X DELETE -H 'Content-Type: application/json;charset=UTF-8')
+
+	echo -en "\nStatus is: ${req_status}\n\n"
+
+elif [[ "${delete_op}" -eq "1" ]]; then
+
+	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} --request "POST" ${GRAF_API_DASHBOARDS}/db \
+		--header "Content-Type: application/json" --data-binary "$(cat <./dash.json)") # --write-out '%{http_code}'
+
+	dash_register=$(echo "${req_status}" | jq -r '.status')
+
+	echo -en "Return code was: ${dash_register}"
+
+	echo -en "\nStatus is: ${req_status}\n\n"
+
+	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X GET ${GRAF_API_BASE}/search?query=power%20usage \
+		-H "Content-Type: application/json")
+	dash_cnt=$(echo "${req_status}" | jq -r '. | length')
+
+	echo -en "Returned dashboard count: ${dash_cnt}\n\n"
+
+	if [[ "${dash_cnt}" -ne 1 ]]; then
+		echo "error, dashboards returned not equal to 1 - something went wrong with inserting; dashboard count: ${dash_cnt}"
+		exit 1
+	fi
+
+	dash_uid=$(echo "${req_status}" | jq -r '.[] | .uid')
+	dash_id=$(echo "${req_status}" | jq -r '.[] | .id')
+
+	echo -en "uid is: ${dash_uid}\nid: ${dash_id}\n\n"
+
+	# star the dashboard which was just inserted
+	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X POST ${GRAF_API_BASE}/user/stars/dashboard/"${dash_id}"/ \
+		-H "Content-Type: application/json")
+
+	echo -en "\n\n This: \n${req_status}\n\n"
+
+	if echo "${req_status}" | grep -q "Dashboard starred!"; then
+		echo -en "Dashboard Starred\n\n"
+	else
+		echo "error starring!"
+		exit 1
+	fi
+
+	req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X PUT "${GRAF_API_BASE}/user/preferences" \
+		-H 'Content-Type: application/json;charset=UTF-8' \
+		--data-binary "{\"homeDashboardId\": ${dash_id}, \"theme\": \"\", \"timezone\": \"\"}")
+
+	if echo "${req_status}" | grep -q "Preferences updated"; then
+		echo -en "Dashboard set as the default one\n\n"
+	else
+		echo "error starring!"
+		exit 1
+	fi
+fi
+
+#
+#HTTP/1.1 200 OK
+#Cache-Control: no-cache
+#Content-Type: text/html; charset=UTF-8
+#Expires: -1
+#Pragma: no-cache
+#X-Content-Type-Options: nosniff
+#X-Frame-Options: deny
+#X-Xss-Protection: 1; mode=block
+#Date: Mon, 24 Aug 2020 02:47:35 GMT
+#
+#{"id":1,"slug":"power-usage","status":"success","uid":"4sxi31NGk","url":"/d/4sxi31NGk/power-usage","version":1}

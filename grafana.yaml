@@ -48,4 +48,3 @@ services:
         - 9233:9233
       # the service is always restarted unless it is manually stopped.
       restart: unless-stopped
-
