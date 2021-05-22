@@ -1,3 +1,5 @@
+![linters](https://github.com/andylamp/grafana-tp-link/workflows/linter/badge.svg)
+
 # Power monitor using Grafana and TP-Link HS110 Plugs
 
 This project came to be as I wanted to monitor my appliance power consumption over time; however, this supposedly

@@ -69,7 +69,22 @@ DOCK_SERVICE_TP_EXPORTER="tp-link-plug-exporter"
 DOCK_WAIT_DURATION=2
 
 # NOTE: Please change this - will not be the same in your system!
-BASE_PATH="/gavatha/container-data"
+BASE_PATH_DEF="/gavatha/container-data"
+BASE_PATH=${BASE_PATH_DEF}
+
+# check if you use my config which, probably does not apply to your setup.
+if [[ ${BASE_PATH} == "${BASE_PATH_DEF}" ]]; then
+  # warn about default path
+	cli_warning_read "Are you sure want to use this path: ${BASE_PATH}? [y/n]: "
+	read -n 1 -r
+	echo ""
+	if [[ ${REPLY} =~ ^[yY]$ ]] || [[ -z ${REPLY} ]]; then
+		cli_info "\tOK, proceeding!"
+	else
+		cli_warning "\tOK, change the variable and rerun the script, bye!"
+		exit 0
+	fi
+fi
 
 # grafana paths
 GRAF_BASE=${BASE_PATH}/grafana-data
