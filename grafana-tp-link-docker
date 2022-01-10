@@ -139,6 +139,7 @@ declare -a IP_PLUG_ARRAY=(
   "${IP_BASE}.57"
   "${IP_BASE}.58"
   "${IP_BASE}.59"
+  "${IP_BASE}.60"
   "${IP_BASE}.61"
   "${IP_BASE}.62"
   "${IP_BASE}.63"
