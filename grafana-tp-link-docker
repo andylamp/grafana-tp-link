@@ -133,15 +133,16 @@ CONT_TYPE='Content-Type: application/json;charset=UTF-8'
 
 # the tp-link plug ip array (does not have to be ordered!)
 declare -a IP_PLUG_ARRAY=(
-  "${IP_BASE}.31"
+  "${IP_BASE}.51"
+  "${IP_BASE}.52"
   "${IP_BASE}.54"
-  "${IP_BASE}.56"
   "${IP_BASE}.57"
   "${IP_BASE}.58"
-  "${IP_BASE}.93"
-  "${IP_BASE}.111"
-  "${IP_BASE}.131"
-  "${IP_BASE}.214"
+  "${IP_BASE}.59"
+  "${IP_BASE}.61"
+  "${IP_BASE}.62"
+  "${IP_BASE}.63"
+  "${IP_BASE}.64"
 )
 
 #### Installation path (install or remove?)
