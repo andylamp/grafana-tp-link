@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: TP-Link power monitoring
+    orgId: 1
+    folder: Power monitoring
+    folderUid: power-monitoring
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

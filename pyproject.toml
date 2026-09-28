@@ -1,0 +1,82 @@
+[project]
+name = "grafana-tp-link"
+version = "0.2.0"
+description = "A provisioned Grafana and Prometheus stack for pyprom-exporters smart plugs."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-only"
+dependencies = []
+
+[project.scripts]
+power-monitor = "grafana_tp_link.cli:main"
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9.4",
+    "prek>=0.5.3",
+    "pytest>=9.1.1",
+    "pytest-xdist>=3.8.0",
+    "PyYAML>=6.0.3",
+    "ruff>=0.16.9",
+    "ty>=0.0.84",
+]
+
+[build-system]
+requires = ["hatchling>=1.32.4"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+# Extend Ruff's standard exclusions instead of duplicating its evolving defaults.
+extend-exclude = [".ipynb_checkpoints", ".ty", ".pyenv", ".pytest_cache", ".vscode", "build", "site-packages"]
+
+# Same as Black.
+line-length = 119
+indent-width = 4
+
+# Match the minimum supported Python version.
+target-version = "py311"
+
+[tool.ruff.lint]
+# Enable every stable and preview Ruff lint rule.
+select = ["ALL"]
+preview = true
+# Trailing commas are owned by the formatter; enabling both creates conflicting edits.
+ignore = ["missing-trailing-comma"]
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest uses assertions, concrete expected values, and internal-state regression checks.
+"tests/**/*.py" = ["assert", "magic-value-comparison", "private-member-access"]
+
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Format code examples in docstrings as well as source files.
+docstring-code-format = true
+
+docstring-code-line-length = "dynamic"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-n", "auto", "--maxprocesses=4", "--dist=worksteal"]
+markers = ["integration: isolated Docker integration tests (RUN_STACK_INTEGRATION=1)"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.src]
+include = ["src", "tests"]

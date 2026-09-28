@@ -1,0 +1,18 @@
+# Credentials and explicit device hosts come from the container environment.
+# This file is mounted read-only; --no-write-config keeps it unchanged.
+prometheus_port: 8090
+log_level: INFO
+exporters:
+  tapo:
+    devices: []
+    max_concurrent_devices: 10
+    discovery_options:
+      # Docker bridge networks cannot reliably discover broadcast traffic on the LAN.
+      perform_discovery: false
+      discovery_timeout: 3
+      timeout: 5
+      with_update: true
+    prometheus_options:
+      refresh_interval: null
+      # Leave five seconds for serialization/transport inside Prometheus's 25s deadline.
+      scrape_timeout: 20.0

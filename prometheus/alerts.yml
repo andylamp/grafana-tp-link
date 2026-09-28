@@ -1,0 +1,35 @@
+# These alerts are visible in Prometheus and Grafana; delivery requires an Alertmanager.
+groups:
+  - name: tp-link-monitoring
+    rules:
+      - alert: TapoExporterDown
+        expr: up{job="pyprom-exporters"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Plug exporter cannot be scraped
+          description: Check exporter logs and the internal exporter:8090 endpoint.
+
+      - alert: TapoNoPowerReadings
+        expr: >-
+          (up{job="pyprom-exporters"} == 1)
+          unless on (job, instance) current_consumption{job="pyprom-exporters"}
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: No plug power readings are available
+          description: Check configured hosts, credentials, reachability and energy-monitoring support.
+
+      - alert: TapoPlugReadingsMissing
+        expr: >-
+          (max by (job, instance, host) (count_over_time(current_consumption{job="pyprom-exporters"}[24h]))
+          unless on (job, instance, host) current_consumption{job="pyprom-exporters"})
+          and on (job, instance) (up{job="pyprom-exporters"} == 1)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Previously observed plug has stopped reporting
+          description: 'Host {{ $labels.host }} reported power within 24h but has no current reading.'

@@ -1,0 +1,33 @@
+# HELP current_consumption Current consumption in watts
+# TYPE current_consumption gauge
+current_consumption{host="192.0.2.10",alias="Desk (main)"} 100
+current_consumption{host="192.0.2.11",alias="Desk (main)"} 250
+# HELP current_voltage Current voltage in volts
+# TYPE current_voltage gauge
+current_voltage{host="192.0.2.10",alias="Desk (main)"} 230
+current_voltage{host="192.0.2.11",alias="Desk (main)"} 240
+# HELP current_current Current current in amps
+# TYPE current_current gauge
+current_current{host="192.0.2.10",alias="Desk (main)"} 0.5
+current_current{host="192.0.2.11",alias="Desk (main)"} 1
+# HELP current_rssi Current RSSI in dBm
+# TYPE current_rssi gauge
+current_rssi{host="192.0.2.10",alias="Desk (main)"} -45
+current_rssi{host="192.0.2.11",alias="Desk (main)"} -75
+# HELP current_consumption_today Energy consumed today in watt-hours
+# TYPE current_consumption_today gauge
+current_consumption_today{host="192.0.2.10",alias="Desk (main)"} 1200
+current_consumption_today{host="192.0.2.11",alias="Desk (main)"} 2300
+# HELP current_month_consumption Energy consumed this month in watt-hours
+# TYPE current_month_consumption gauge
+current_month_consumption{host="192.0.2.10",alias="Desk (main)"} 12000
+current_month_consumption{host="192.0.2.11",alias="Desk (main)"} 23000
+# HELP tapo_discovered_devices Number of discovered Tapo devices
+# TYPE tapo_discovered_devices gauge
+tapo_discovered_devices 2
+# HELP process_resident_memory_bytes Resident memory size in bytes
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 10485760
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 12

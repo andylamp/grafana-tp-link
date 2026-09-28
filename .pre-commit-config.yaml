@@ -1,21 +1,65 @@
-default_stages:
-  - commit
-  - push
-
+minimum_prek_version: "0.5.3"
 repos:
-  - repo: https://github.com/jumanjihouse/pre-commit-hooks
-    rev: 2.1.5  # or specific git tag
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
     hooks:
-      - id: fasterer
-      - id: forbid-binary
-        types: ['binary']
-        exclude: >
-          (?x)^(assets/power-meter-dashboard-example.jpg)$
-      - id: git-check  # Configure in .gitattributes
-      - id: markdownlint # Configure in .mdlrc
-      - id: script-must-have-extension
-      - id: script-must-not-have-extension
-      - id: shellcheck
-        additional_dependencies: []
+      - id: check-symlinks
+      - id: fix-byte-order-marker
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-json
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+      - id: check-ast
+      - id: debug-statements
+      - id: detect-private-key
+      - id: pretty-format-json
+        args: ["--autofix"]
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.23.3
+    hooks:
+      - id: markdownlint-cli2
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.14.1-1
+    hooks:
       - id: shfmt
-        args: [ -i 2 ]
+        args: ["-i", "4"]
+  - repo: local
+    hooks:
+      - id: uv-lock
+        name: uv lock freshness
+        entry: uv lock --check
+        language: system
+        files: ^(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --locked ruff check --fix
+        language: system
+        files: '(\.pyi?$|(^|/)pyproject\.toml$)'
+        types_or: [python, pyi, toml]
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --locked ruff format
+        language: system
+        types_or: [python, pyi]
+      - id: ty-check
+        name: ty
+        entry: uv run --locked ty check
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+      - id: bandit
+        name: bandit
+        entry: uv run --locked bandit -q -r src
+        language: system
+        types: [python]
+        pass_filenames: false

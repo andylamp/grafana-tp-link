@@ -1,19 +1,58 @@
-# a more complete example of the linters which includes testing.
-name: linter
+name: CI
 
-on: [ push, pull_request ]
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
 
-# the defined jobs
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  # the job build configuration and steps
-  build:
-    # we use ubuntu latest for this, which normally is the most recent LTS version
+  lint:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v2
-      # Shell linting phase
-      - uses: ludeeus/action-shellcheck@master
-        name: Running shell check...
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+      - run: uv sync --locked
+      - run: uv run --locked prek run --all-files
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --locked
+      - run: uv run --locked pytest -m 'not integration'
+      - run: uv build --no-sources
+
+  integration:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+      - run: uv sync --locked
+      - name: Test provisioned stack with simulated device metrics
+        run: uv run --locked pytest -n 0 -m integration
         env:
-          SHELLCHECK_OPTS: -x
+          RUN_STACK_INTEGRATION: "1"

@@ -1,348 +1,242 @@
-![linters](https://github.com/andylamp/grafana-tp-link/workflows/linter/badge.svg)
+# TP-Link power monitoring
 
-# Power monitor using Grafana and TP-Link HS110 Plugs
+Monitor TP-Link Tapo and Kasa energy-monitoring plugs with
+[pyprom-exporters](https://github.com/andylamp/pyprom-exporters), Prometheus and Grafana.
+The stack provisions its datasource, dashboard and alert rules from this repository.
+It probes devices on scrape by default and keeps monitoring data in persistent Docker volumes.
 
-This project came to be as I wanted to monitor my appliance power consumption over time; however, this supposedly
-easy task was harder than I thought as, until fairly recently, there were no *affordable* reliable high current power
-plugs that I could buy. Thankfully, I discovered [TP-Link HS110][3] which were a match made in heaven as their protocol
-was reverse engineered meaning I could use mature, open source tools to do the monitoring. To that end, I elected to
-use [Grafana][1] which is a nifty little tool that can be used to monitor various signals that come out of your
-infrastructure - in my use case, power consumption.
+**Already running the older stack?** Read [Migrating an existing installation](docs/migration.md)
+before starting these containers. The new stack uses fresh volumes by default and does not migrate old databases.
 
-The steps to take to achieve this are the following:
+## What is included
 
- 1. Setup [Grafana][1], [Prometheus][2], and [tp-link exporter][4] as a docker services.
- 1. Install a Grafana dashboard which ingests and displays the required metrics.
- 1. (Optionally) Configure `ufw` to allow access from the local network.
+| Component | Pinned version | Purpose |
+| --- | --- | --- |
+| pyprom-exporters | 0.2.0 | Concurrent Tapo/Kasa discovery and live measurements |
+| Prometheus | 3.15.0 | Time-series storage, scraping and alert evaluation |
+| Grafana | 13.2.2 | Provisioned power, energy and health dashboard |
 
-# Power meter (HS110)
+Images are pinned by version and digest in [compose.yaml](compose.yaml). The exporter replaces
+`fffonion/tplink-plug-exporter`; its metrics and device configuration are different.
 
-The power meter of choice would be the [TP-Link HS110][3] due to its ability to be used for this purpose using the
-exporter provided [here][4]; this was made possible due to the (awesome) reverse engineering of the used protocol,
-if you fancy a good read you can read more about this [here][5]. Another, added bonus, is that they are
-quite affordable at about 24 € per piece.
+The dashboard includes current power, daily/monthly energy, voltage, current, Wi-Fi signal and exporter diagnostics.
+Only Grafana's built-in panels are used. Datasource, job, exporter, host and device filters make it portable across
+installations, including devices with identical aliases.
 
-## Warning
+![Provisioned dashboard with simulated device readings](assets/power-dashboard.png)
 
-All power plugs/appliances have power ratings for the maximum amount of Watts and Amperage that they can handle -
-please *be careful*. These plugs are quite generous in terms of their allowed wattage as they can handle *up to* 16A of
-current and *up to* 3.5kW (at 240V, less than half of that at 110V). This means that they can be used for computers,
-servers, UPSes and so on... but not for heavy-duty devices such as stoves, kitchens, high capacity (>24K BTU)
-multi-split AC's etc.
+## Quick start
 
-# Installation
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and
+[Docker with the Compose plugin](https://docs.docker.com/compose/install/).
+The Python utility supports Python 3.11 and newer; uv can provision Python when needed.
+The Docker host must be able to reach your plugs on the LAN.
 
-As detailed below, there are quite a few steps for installation. The following [shell script][7] is designed to
-simplify this.
-
-This script includes both **installing** and **updating** as you basically invoke the *same* script with no parameters.
-
-To run it, you can do the following:
-
-```bash
-# clone this repository
-git clone https://github.com/andylamp/grafana-tp-link
-# enter this directory
+```sh
+git clone https://github.com/andylamp/grafana-tp-link.git
 cd grafana-tp-link
-# run the script to install everything
-./grafana-tp-link
-# alternatively you can use
-./grafana-tp-link -i
+uv sync --locked
+uv run --locked power-monitor init
 ```
 
-If you need, at some point, to stop the services from running you can run the same script with the parameter `-r`
-which stops the services and removes the containers -- and **does** delete the stored data, and their associated
-configurations, so be careful!
+`init` creates a Git-ignored `.env` with private permissions and a randomly generated Grafana admin password.
+It prints no password and preserves an existing `.env`.
 
-```bash
-# in the same directory as above, execute:
-./grafana-tp-link -r
+Edit `.env` before continuing:
+
+- Set `TAPO_PLUG_DEVICES` to explicit plug IP addresses or resolvable hostnames, separated by spaces or commas.
+  Reserve their DHCP addresses where possible. Docker bridge networking does not provide reliable LAN broadcast discovery.
+- Set `TP_LINK_USERNAME` and `TP_LINK_PASSWORD` when your devices require Tapo account authentication.
+  Older Kasa/HS110 devices may work with both empty.
+- Keep or change the generated `GRAFANA_ADMIN_PASSWORD`. Read it locally from `.env` when signing in.
+  Single-quote values containing `$` or `#` so Compose treats those characters literally.
+
+Then validate and start the stack:
+
+```sh
+uv run --locked power-monitor check
+uv run --locked power-monitor up
 ```
 
-## The result
+Open [Grafana](http://127.0.0.1:3000/) and sign in as `admin`, or your configured `GRAFANA_ADMIN_USER`.
+The **TP-Link · Power & Energy** dashboard is provisioned automatically and selected as the home dashboard.
+No API registration script, manual datasource creation or dashboard upload is required.
 
-This is what you can expect to see once installed - please note that names, values, and colors might be different in
-your case as these are dependent on the names and configuration you give within [Kasa app][10].
+`check` validates Compose and runs the pinned Prometheus image's `promtool` against the configuration and alert rules.
+It also runs the alert-rule fixtures. It does not start the exporter or probe plugs.
+`up` waits for container health checks; those checks establish service readiness,
+not that every configured plug has produced a reading.
 
-![power-dash](assets/power-meter-dashboard-example.jpg)
+## Operating the stack
 
-# Explanation
+Run commands from this checkout. From another directory, specify both the uv project and stack location:
 
-## TP-Link exporter container
-
-The first thing we need to configure is the HS110 exporter container, as mentioned previously we'll be using the one
-provided from [here][4]. The following `yaml` creates the requested docker service.
-
-```yaml
-tp-link-plug-exporter:
-  container_name: : tp-link-plug-exporter
-  image: fffonion/tplink-plug-exporter:latest
-  ports:
-    - 9233:9233
-  # the service is always restarted unless it is manually stopped.
-  restart: unless-stopped
+```sh
+uv run --locked --project /path/to/grafana-tp-link \
+  power-monitor --directory /path/to/grafana-tp-link status
 ```
 
-## Prometheus container
+| Command | Behavior |
+| --- | --- |
+| `uv run --locked power-monitor init` | Create `.env` once without replacing local settings |
+| `uv run --locked power-monitor check` | Validate Compose, Prometheus configuration and rules |
+| `uv run --locked power-monitor up` | Create/update services and wait for health checks |
+| `uv run --locked power-monitor status` | Show service status |
+| `uv run --locked power-monitor logs --follow exporter` | Follow exporter logs |
+| `uv run --locked power-monitor down` | Stop this stack while retaining persistent volumes |
+| `uv run --locked power-monitor pull` | Download the pinned images |
 
-This is a neat solution for tracking measurements over time, it has much more powerful capabilities than the ones
-we're exploiting in this tiny tool. To start a Prometheus container with *persistence* (i.e.: meaning our measurements
-will be stored) we can do the following:
+`make init`, `make up`, `make down`, `make status`, `make logs` and `make pull` provide equivalent shortcuts.
+The compatibility wrapper `./grafana-tp-link-docker -i` starts services and `-r` stops them while preserving data.
+Use `power-monitor init` first. The old destructive removal behavior has been removed.
 
-```yaml
-prometheus:
-  container_name: prometheus-local
-  image: prom/prometheus:latest
-  command:
-    - "--storage.tsdb.retention.time=3y"
-    - "--web.enable-lifecycle"
-    - "--config.file=/etc/prometheus/prometheus.yml"
-  user: "1000"
-  ports:
-    - 9090:9090
-  volumes:
-    - /usr/prometheus-container-data/config:/etc/prometheus
-    - /usr/prometheus-container-data/data:/prometheus
-  depends_on:
-    - tp-link-plug-exporter
-  restart: unless-stopped
+The Compose project is `tp-link-monitoring`, distinct from the legacy `grafana-tp-link` project.
+`status`, `logs`, `down` and `pull` also work without `.env`. If you originally set a custom
+`COMPOSE_PROJECT_NAME`, retain that name in `.env` or export it in your shell to address the same stack.
+`check` and `up` require configured device hosts and validate the resolved settings before creating containers.
+
+Pulling downloads the versions recorded in `compose.yaml`; it does not select newer releases automatically.
+Review version and digest changes together, consult upstream upgrade notes, back up data, then run `pull` and `up`.
+
+## Configuration
+
+[.env.example](.env.example) lists the local environment settings. Credentials are not written into the tracked
+exporter configuration. Docker administrators can still inspect container environment variables; keep `.env` private.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `TAPO_PLUG_DEVICES` | Required | Explicit plug hosts, separated by spaces or commas |
+| `TP_LINK_USERNAME`, `TP_LINK_PASSWORD` | Empty | Device account credentials when required |
+| `PYPROM_EXPORTERS_LOG_LEVEL` | `INFO` | Exporter logging level |
+| `GRAFANA_ADMIN_USER` | `admin` | Initial Grafana administrator name |
+| `GRAFANA_ADMIN_PASSWORD` | Generated by `init` | Initial password for a new Grafana database |
+| `GRAFANA_BIND_ADDRESS` | `127.0.0.1` | Host address serving Grafana |
+| `GRAFANA_PORT` | `3000` | Host port serving Grafana |
+| `PROMETHEUS_RETENTION_TIME` | `3y` | Maximum stored history by age |
+| `PROMETHEUS_RETENTION_SIZE` | `10GB` | Maximum stored blocks by size |
+
+Changing Grafana's initial admin settings does not reset accounts in an existing database.
+Use Grafana's account-management or password-reset facilities for an existing installation.
+
+Grafana binds to the local host by default. For remote access, configure a suitable bind address and your network's
+access controls, or place it behind an authenticated TLS reverse proxy. Prometheus and the exporter are available only
+on the Compose network; their ports are not published to the host.
+
+Prometheus removes older blocks when either retention limit is reached. The size setting does not cap all disk use:
+allow additional space for the write-ahead log, active samples and compaction. Volumes persist across `down` and `up`.
+Do not use `docker compose down --volumes` when you want to retain the data.
+
+### Scraping and device concurrency
+
+The checked-in defaults are:
+
+- Prometheus scrapes `exporter:8090/metrics` every 30 seconds, with a 25-second timeout.
+- The exporter probes on scrape (`refresh_interval: null`) and waits up to 20 seconds for the refresh.
+- Up to 10 device operations run concurrently. Individual device requests time out after 5 seconds.
+- Overlapping exporter scrapes share an in-flight refresh. If its wait expires, the exporter can return an older snapshot.
+
+Edit [config/exporter.yaml](config/exporter.yaml) for device concurrency and exporter timeouts.
+Edit [prometheus/prometheus.yml](prometheus/prometheus.yml) for scraping and evaluation intervals.
+Keep the exporter wait below Prometheus's scrape timeout and the scrape timeout below the scrape interval.
+Keep Grafana's datasource interval in
+[grafana/provisioning/datasources](grafana/provisioning/datasources) aligned with the scrape interval.
+
+A positive `refresh_interval` enables background polling instead of live probing. Increase concurrency or polling
+intervals based on observed device latency and LAN capacity; larger fleets and unreachable plugs can lengthen refreshes.
+Run `power-monitor check` after changes and restart affected services to load updated configuration.
+Compose `up` does not detect changed contents of bind-mounted configuration files. For example:
+
+```sh
+uv run --locked power-monitor check
+docker compose --env-file .env -f compose.yaml restart exporter prometheus grafana
 ```
 
-An interesting point is that the default measurements are not kept for long (due to space constraints).
-However, I'd like to keep my data a little longer as space is not really an issue for the volume of data that I am
-dealing with, hence by using the flag `--storage.tsdb.retention.time=3y` we tell `Prometheus` to keep the values for
-3 years.
+## Reading and reusing the dashboard
 
-Another interesting bit is that we have to explicitly state where the config file resides as when we create the bind
-volume for `/etc/prometheus` it's not populated with anything and thus we not only have to copy our configuration file
-but also explicitly tell the Prometheus its location.
+[dash.json](dash.json) is a standalone dashboard that can also be imported into another Grafana installation.
+Choose **Dashboards → New → Import**, upload the file, and select a Prometheus source using the dashboard's
+**Data source** variable. The provisioned source has UID `prometheus`; the dashboard UID is `tp-link-power`.
+Choose the job and exporter filters if your scrape labels differ.
 
-Finally, please note that in order for everything to work we need to start the container using the ID of the user the
-bound volume mounts belong to (in this case, me) - otherwise, it won't work.
+The provisioned dashboard is managed by its JSON file. Save customizations back to `dash.json`, or make a separate
+Grafana copy with a different UID. Provisioning updates the managed dashboard from disk; UI changes are disabled for it.
 
-## Grafana container
+| Metric | Native unit | Dashboard meaning |
+| --- | --- | --- |
+| `current_consumption` | W | Instantaneous device power |
+| `current_voltage` | V | Device voltage, where supported |
+| `current_current` | A | Device current, where supported |
+| `current_rssi` | dBm | Received wireless signal strength, where supported |
+| `current_consumption_today` | Wh | Energy accumulated on the plug's calendar day |
+| `current_month_consumption` | Wh | Energy accumulated in the plug's calendar month |
+| `tapo_discovered_devices` | Devices | Retained discovery inventory, not an online count |
 
-To create and configure our Grafana container, we will use the following `Dockerfile` which creates an image based on
-the pre-existing (latest) Grafana version while also setting up bind volumes. This means that we'll also need to create
-the appropriate folders on our machine where the data will be stored.
+Energy is already in Wh; Grafana scales its display to kWh when appropriate. Daily and monthly values are gauges that
+reset on the plug's calendar. They are neither lifetime counters nor energy consumed during the dashboard's selected
+range. The dashboard does not apply `rate`/`increase` to them or estimate energy from a fixed sampling cadence.
 
-We first start by defining the `yaml` file we want to use - the full dockerfile is shown below.
+A blank reading means unavailable data, not zero. Totals include only selected devices that report the relevant metric.
+The same physical plug monitored by multiple exporters can be counted more than once. Model and firmware capabilities
+vary, so a working power reading does not imply that voltage, current, energy or Wi-Fi metrics are available.
 
-```yaml
-grafana:
-  container_name: grafana-local
-  image: grafana/grafana:latest
-  # here you put your user id that owns the directories - 1000 is an example!
-  user: "1000"
-  # setup grafana volume mounts for persistence.
-  volumes:
-    - "/usr/grafana-container-data/data:/var/lib/grafana"
-    - "/usr/grafana-container-data/log:/var/log/grafana"
-    - "/usr/grafana-container-data/config:/etc/grafana"
-  # this is the default port used by Grafana - if you need to use another, change it.
-  depends_on:
-    - prometheus
-  ports:
-    - 3000:3000
-  # the service is always restarted unless it is manually stopped.
-  restart: unless-stopped
+**Exporter scrape status and scrape age describe Prometheus requests, not device freshness.** The exporter does not expose
+per-device update timestamps, online status or relay state. A successful scrape can contain an older snapshot; inspect
+exporter logs when values stop changing. Graphs preserve gaps, and queries hide device values when the exporter scrape
+has failed.
+
+### Alerts and troubleshooting
+
+[prometheus/alerts.yml](prometheus/alerts.yml) evaluates three rules:
+
+| Alert | Condition |
+| --- | --- |
+| `TapoExporterDown` | An exporter target fails scrapes for two minutes |
+| `TapoNoPowerReadings` | A reachable exporter returns no power series for five minutes |
+| `TapoPlugReadingsMissing` | A host seen within 24 hours has no current power series for five minutes |
+
+These rules are evaluated in Prometheus. No Alertmanager or notification delivery is configured.
+The missing-host rule cannot detect a plug that has never reported, or one absent for longer than its 24-hour history
+window. Intentionally removing a previously observed host can trigger it. None of these rules can detect an old snapshot
+that is still being returned successfully.
+
+For missing readings, check `power-monitor status`, then `power-monitor logs exporter`.
+Confirm explicit host addresses, reachability from Docker, credentials and the device's energy-monitoring support.
+If Grafana cannot query Prometheus, inspect `power-monitor logs prometheus grafana` and datasource provisioning.
+
+## Development
+
+```sh
+uv sync --locked
+uv run --locked prek install
+uv run --locked pytest
+uv run --locked prek run --all-files
 ```
 
-Please note that this service is dependent on Prometheus (which in turn is dependent on tp-link-exporter).
-However, if we want to have the power meter dashboard operational from the get-go we have to perform a little bit
-of hacking in order to get everything sorted.
+Pytest runs with up to four workers by default; use `-n 0` for serial debugging.
+Docker integration tests are skipped unless explicitly enabled. To run them against the pinned images:
 
-### Registering the datasource (Prometheus)
-
-Initially, in order to use any of the dashboards we have to link Grafana with a datasource, in our case this is our
-newly created Prometheus container; hence, exploiting `curl` we can perform the following command to register the
-datastore with Grafana:
-
-```bash
-# wrapper function that sets up the prometheus data source and sets it as the default one.
-function setup_prometheus_datasource() {
-  # now, since the endpoint seems alright - try to use the username/pass to access the API
-  req_status=$(curl -s -I --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES} 2>/dev/null | \
-head -n 1 | cut -d$' ' -f2)
-  # check the return code of the API - if it is 200, then we can login and register the datasource.
-  if [[ "${req_status}" -ne "200" ]]; then
-    cli_error "The HTTP request code returned was not 200 but rather ${req_status}, indicating an error"
-    return 1
-  else
-    cli_info "Grafana API is accessible and can use the supplied credentials to interact."
-    if curl -s --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES} | grep -q "prometheus"; then
-      cli_warning "Seems Prometheus datasource is already present - skipping grafana config."
-    else
-      cli_info "Prometheus data source seems to be missing -- registering"
-      req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} ${GRAF_API_DATASOURCES}/ \
--X POST -H "${CONT_TYPE}" \
---data-binary "{\"name\":\"Prometheus\", \"isDefault\":true , \
-\"type\":\"prometheus\", \"url\":\"http://${HOST_PROM}:9090\", \"access\":\"proxy\", \"basicAuth\":false}")
-
-       # now check if the data source was added
-      if echo "${req_status}" | grep -q "Datasource added"; then
-        cli_info "Prometheus data source appears to have been added successfully."
-      else
-        cli_error "Could not add Prometheus data source, reason: ${req_status}."
-        return 1
-      fi
-    fi
-  fi
-}
+```sh
+make integration
+# Equivalent:
+RUN_STACK_INTEGRATION=1 uv run --locked pytest -n 0 -m integration
 ```
 
-This function tries to register the datasource while also checking if we failed or if the datasource we are trying to
-add (`Prometheus`) is already registered.
+The integration suite uses an isolated Compose project and fake devices/metrics. It does not require physical plugs
+or real account credentials. It validates configuration, provisioning, dashboard queries and monitoring failure cases.
+`make test` runs the regular tests; `make check` runs all prek hooks.
 
-### Registering the Dashboard
+Ruff enables all stable and preview rules, ty checks Python, and Markdown uses the same
+[markdownlint configuration](.markdownlint-cli2.jsonc) as `pyprom-exporters`.
+Python dependencies and tools are locked in `uv.lock`; update them with `uv lock --upgrade`, then rerun checks.
+Keep audit notes in ignored `scratch/` and generated reports in ignored `report/`.
 
-The next thing we need to perform is to register the power consumption monitor dashboard into our newly Grafana
-container; to do so, we'll exploit the provided [REST API][9].
+## Repository layout
 
-To register the dashboard (full `json` dashboard definition can be found [here][6]) - we have to perform the
-following command:
-
-```bash
-# try to register the grafana dashboard based on the json spec
-req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X POST "${GRAF_API_DASHBOARDS}/db" \
--H "${CONT_TYPE}" --data-binary "$(cat < ${GRAF_DASH_FILE})")
-
-# check if the registration was successful
-if [[ "$(echo "${req_status}" | jq -r '.status')" == "success" ]]; then
-  cli_info "Grafana dashboard was registered successfully!"
-elif [[ "$(echo "${req_status}" | jq -r '.status')" == "name-exists" ]]; then
-  cli_warning "Grafana dashboard with the same name already exists - skipping registration"
-else
-  cli_error "Could not register grafana dashboard... something went wrong -- cannot continue"
-  return 1
-fi
-```
-
-### Starring the Dashboard
-
-Following the registration of our dashboard before being able to set it as the default for our current user we have
-to `star` is, which can be performed as is shown below:
-
-```bash
-# now, star the dashboard which was just registered for our user
-req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} \
--X POST ${GRAF_API_BASE}/user/stars/dashboard/"${dash_id}"/ \
--H "${CONT_TYPE}")
-
-# check if the dashboard has been already starred or if the process was succesful or not
-if [[ "${dash_starred}" = "true" ]]; then
-  cli_warning "Dashboard already starred - skipping"
-elif echo "${req_status}" | grep -q "Dashboard starred!"; then
-  cli_info "Dashboard with uid: ${dash_uid} was starred successfully for user ${GRAF_USER}"
-else
-  cli_error "Dashboard with uid: ${dash_uid} failed to be starred for user ${GRAF_USER} -- cannot continue"
-  return 1
-fi
-```
-
-### Making the Dashboard default
-
-The final bit of the long puzzle is to make the newly created dashboard the default one, meaning that when logging
-in the first thing presented would be this dashboard.
-
-```bash
-# finally, we have to make it the default dashboard, so once we login is immediately presented
-req_status=$(curl -s --user ${GRAF_USER}:${GRAF_PASS} -X PUT "${GRAF_API_BASE}/user/preferences" \
--H "${CONT_TYPE}" \
---data-binary "{\"homeDashboardId\": ${dash_id}, \"theme\": \"\", \"timezone\": \"\"}")
-
-if echo "${req_status}" | grep -q "Preferences updated"; then
-  cli_info "User ${GRAF_USER} preferences updated to make dashboard (with id: ${dash_id}) default"
-else
-  cli_error "Error updating user preferences to make dashboard (with id: ${dash_id}) default"
-  return 1
-fi
-```
-
-### Extra bits
-
-The scripts that were used to experiment with the Grafana API are included as scratch notes [here][8] hopping that
-might be of use to somebody; use them at your own peril!
-
-## (Optionally) configure `ufw`
-
-In order to be able to access the Grafana dashboard through our wider local network then we'd need to configure our
-firewall to allow these ports for outside communication; in my case, I am mostly using `ufw`, so if your firewall
-differs please follow its respective manual to open the required ports.
-
-There are different ways to configure the ports but personally the way I like to do this is to create individual rules
-in `ufw` for each application I want to allow/block and just apply them - this is also a bit tidier in case you want to
-see what's going on when using `ufw status verbose`. An example of a rule for `Grafana` is the following:
-
-```text
-[grafana]
-title=Grafana
-description=Grafana
-ports=3000/tcp
-```
-
-The rules are normally placed in `/etc/ufw/applications.d/`, which is where I've put this as well. Please note that
-they *do not* require any type of extension; for example the above rule would be placed using:
-
-```bash
-sudo echo -e \
-"[grafana]
-title=Grafana
-description=Grafana
-ports=3000/tcp
-" > /etc/ufw/applications.d/grafana
-```
-
-Now to register, we could use the following segment, which both checks if the rule is already registered and reports
-any failures.
-
-```bash
-setup_ufw() {
-  # optionally, we can configure ufw to open grafana to our local network.
-  if [[ ${UFW_CONF} = true ]]; then
-    cli_info "Configuring ufw firewall is enabled - proceeding"
-    # output the rule in the ufw application folder - note if rule already exists, skips creation.
-    if [[ -f /etc/ufw/applications.d/${UFW_GRAF_RULENAME} ]]; then
-      cli_warning "ufw Grafana rule file already exists - skipping."
-    else
-        if ! echo -e \
-"[${UFW_GRAF_RULENAME}]
-title=Grafana
-description=Grafana
-ports=3000/tcp
-" | sudo tee -a /etc/ufw/applications.d/${UFW_GRAF_RULENAME} > /dev/null; then
-        cli_error "Failed to output Grafana ufw rule successfully - exiting."
-        return 1
-      else
-        cli_info "ufw Grafana rule file was created successfully!"
-      fi
-    fi
-
-    # now configure the ufw rule
-    if [[ "$(sudo ufw status)" == "Status: inactive" ]]; then
-      cli_warning "ufw is inactive we are not adding the rule in it for now."
-    elif ! sudo ufw status verbose | grep -q ${UFW_GRAF_RULENAME}; then
-      cli_info "ufw rule seems to be missing - trying to add!"
-      if ! sudo ufw allow from ${UFW_SUBNET} to any app ${UFW_GRAF_RULENAME}; then
-        cli_error "Failed to configure ufw rule - exiting!"
-        return 1
-      else
-        cli_info "ufw Grafana rule was applied successfully!"
-      fi
-    else
-      cli_warning "ufw Grafana rule seems to be registered already - skipping!"
-    fi
-  fi
-}
-```
-
-[1]: https://grafana.com/
-[2]: https://prometheus.io/
-[3]: https://www.tp-link.com/gr/home-networking/smart-plug/hs110/
-[4]: https://github.com/fffonion/tplink-plug-exporter
-[5]: https://github.com/softScheck/tplink-smartplug
-[6]: dash.json
-[7]: grafana-tp-link-docker
-[8]: scratch-scripts
-[9]: https://grafana.com/docs/grafana/latest/http_api/
-[10]: https://www.kasasmart.com/us
+- `compose.yaml`: pinned Compose services, volumes and health checks.
+- `config/exporter.yaml`: exporter behavior; credentials and hosts come from `.env`.
+- `prometheus/`: scrape configuration and alert rules.
+- `grafana/provisioning/`: datasource and dashboard provisioning.
+- `dash.json`: portable Grafana dashboard.
+- `src/grafana_tp_link/`: the `power-monitor` utility.
+- `tests/`: configuration, dashboard, utility and isolated integration tests.
+- `docs/migration.md`: preservation and upgrade guidance for an existing stack.

@@ -1,0 +1,158 @@
+# Run with promtool test rules; all device addresses are reserved documentation addresses.
+rule_files:
+- ../alerts.yml
+evaluation_interval: 30s
+tests:
+- name: Zero watts is a healthy reading
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: 1x20
+  - series: current_consumption{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="Idle plug"}
+    values: '0x20'
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: TapoExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoNoPowerReadings
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoPlugReadingsMissing
+    exp_alerts: []
+- name: Exporter failure suppresses missing-device alerts
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: '0x20'
+  - series: current_consumption{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="Desk"}
+    values: 40 stale _x19
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: TapoExporterDown
+    exp_alerts: []
+  - eval_time: 1m
+    alertname: TapoNoPowerReadings
+    exp_alerts: []
+  - eval_time: 1m
+    alertname: TapoPlugReadingsMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoExporterDown
+    exp_alerts:
+    - exp_labels:
+        job: pyprom-exporters
+        instance: exporter:8090
+        severity: critical
+      exp_annotations:
+        summary: Plug exporter cannot be scraped
+        description: Check exporter logs and the internal exporter:8090 endpoint.
+  - eval_time: 6m
+    alertname: TapoNoPowerReadings
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoPlugReadingsMissing
+    exp_alerts: []
+- name: Reachable exporter without any power readings
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 4m
+    alertname: TapoExporterDown
+    exp_alerts: []
+  - eval_time: 4m
+    alertname: TapoNoPowerReadings
+    exp_alerts: []
+  - eval_time: 4m
+    alertname: TapoPlugReadingsMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoNoPowerReadings
+    exp_alerts:
+    - exp_labels:
+        job: pyprom-exporters
+        instance: exporter:8090
+        severity: warning
+      exp_annotations:
+        summary: No plug power readings are available
+        description: Check configured hosts, credentials, reachability and energy-monitoring support.
+- name: One lost host alerts, then clears on recovery
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: 1x20
+  - series: current_consumption{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="Desk"}
+    values: 40 40 stale _x11 0x6
+  - series: current_consumption{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.11",alias="Idle plug"}
+    values: '0x20'
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: TapoExporterDown
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: TapoNoPowerReadings
+    exp_alerts: []
+  - eval_time: 5m
+    alertname: TapoPlugReadingsMissing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoPlugReadingsMissing
+    exp_alerts:
+    - exp_labels:
+        job: pyprom-exporters
+        instance: exporter:8090
+        severity: warning
+        host: 192.0.2.10
+      exp_annotations:
+        summary: Previously observed plug has stopped reporting
+        description: Host 192.0.2.10 reported power within 24h but has no current reading.
+  - eval_time: 8m
+    alertname: TapoExporterDown
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: TapoNoPowerReadings
+    exp_alerts: []
+  - eval_time: 8m
+    alertname: TapoPlugReadingsMissing
+    exp_alerts: []
+- name: Renaming an alias keeps the same host healthy
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: 1x20
+  - series: current_consumption{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="Old name"}
+    values: 40 40 stale _x18
+  - series: current_consumption{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="New name"}
+    values: _ _ 0x18
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: TapoExporterDown
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoNoPowerReadings
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoPlugReadingsMissing
+    exp_alerts: []
+- name: Devices last observed more than 24 hours ago age out
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: 1x2900
+  - series: current_consumption{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="Retired
+      plug"}
+    values: 40 stale _x2900
+  - series: current_consumption{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.11",alias="Idle plug"}
+    values: '0x2900'
+  alert_rule_test:
+  - eval_time: 24h1m
+    alertname: TapoExporterDown
+    exp_alerts: []
+  - eval_time: 24h1m
+    alertname: TapoNoPowerReadings
+    exp_alerts: []
+  - eval_time: 24h1m
+    alertname: TapoPlugReadingsMissing
+    exp_alerts: []
