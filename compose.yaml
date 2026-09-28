@@ -12,7 +12,7 @@ services:
     image: andylamp/pyprom-exporters:0.2.0@sha256:57c777a6e048722870a1af315f1cab26b41bb141872779d6656f33e6b4e4892e
     command: ["--config", "/etc/pyprom-exporters/config.yaml", "--no-write-config"]
     environment:
-      TAPO_PLUG_DEVICES: ${TAPO_PLUG_DEVICES:?Set TAPO_PLUG_DEVICES in .env to explicit device IPs or hostnames}
+      TAPO_PLUG_DEVICES: ${TAPO_PLUG_DEVICES:-}
       TP_LINK_USERNAME: ${TP_LINK_USERNAME:-}
       TP_LINK_PASSWORD: ${TP_LINK_PASSWORD:-}
       PYPROM_EXPORTERS_LOG_LEVEL: ${PYPROM_EXPORTERS_LOG_LEVEL:-INFO}

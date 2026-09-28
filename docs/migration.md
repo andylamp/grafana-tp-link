@@ -173,8 +173,20 @@ Keep the old dashboard under a separate UID if you want to retain it for histori
 ## Metric and dashboard changes
 
 Prometheus now scrapes one aggregate endpoint at `exporter:8090/metrics` with job `pyprom-exporters`.
-Explicit device hosts belong in `TAPO_PLUG_DEVICES`;
-the old per-device scrape target/relabel configuration is no longer used.
+Configure explicit hosts in `config/exporter.yaml` under `exporters.tapo.devices`, one address per YAML entry.
+Inline comments can describe each plug. The old per-device scrape target/relabel configuration is no longer used.
+See the [YAML inventory example](../README.md#quick-start); credentials remain in `.env`.
+
+A nonempty `TAPO_PLUG_DEVICES` still replaces the entire YAML list. Clear or remove an old list in `.env` and unset
+any exported shell value when switching to YAML; an empty or unset value uses YAML, while whitespace/comma-only
+values are rejected. For the standard stack, run `power-monitor check`, then `power-monitor up` after changing the
+environment so the exporter container receives the new settings. If using a local Compose override, start with the
+explicit two-file Compose command above instead, retaining your copied-data mounts.
+For later YAML-only changes, run `power-monitor check` and restart the exporter
+with `docker compose --env-file .env -f compose.yaml restart exporter`; include your override file if using one.
+Compose `up` alone does not detect edits to bind-mounted YAML. The exporter's `--no-write-config` flag preserves comments.
+`check` and `up` require at least one explicit host from the effective YAML/environment configuration.
+
 The endpoint probes devices concurrently. Its scrape timeout is 25 seconds, its interval is 30 seconds, and the exporter's
 live-refresh wait is 20 seconds by default.
 

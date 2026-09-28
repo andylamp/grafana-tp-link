@@ -43,7 +43,7 @@ def mapping(value: object) -> dict[str, object]:
     return cast("dict[str, object]", value)
 
 
-def run(arguments: list[str], *, environment: dict[str, str] | None = None) -> str:
+def run(arguments: list[str], *, environment: dict[str, str] | None = None, input_text: str | None = None) -> str:
     """Run a bounded command and retain output for useful failure reports.
 
     Returns
@@ -54,6 +54,7 @@ def run(arguments: list[str], *, environment: dict[str, str] | None = None) -> s
     result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - Explicit argv and resolved Docker path.
         arguments,
         env=environment,
+        input=input_text,
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -120,7 +121,7 @@ class Stack:
     environment: dict[str, str] = field(repr=False)
     exporter_config: Path
 
-    def compose(self, *arguments: str) -> str:
+    def compose(self, *arguments: str, input_text: str | None = None) -> str:
         """Run Compose against only this test's generated project.
 
         Returns
@@ -131,6 +132,7 @@ class Stack:
         return run(
             [self.docker, "compose", "-p", self.project, "-f", str(self.compose_file), *arguments],
             environment=self.environment,
+            input_text=input_text,
         )
 
     def url(self, service: str, port: int) -> str:
@@ -147,6 +149,23 @@ class Stack:
         return f"http://{endpoint}"
 
 
+def isolated_exporter_configuration(source: str) -> str:
+    """Clear device targets and credentials while retaining unrelated exporter settings.
+
+    Returns
+    -------
+    str
+        A YAML copy suitable for running the image without device discovery.
+    """
+    config = mapping(yaml.safe_load(source))
+    exporter = mapping(mapping(config["exporters"])["tapo"])
+    exporter["devices"] = []
+    discovery = mapping(exporter.setdefault("discovery_options", {}))
+    discovery["perform_discovery"] = False
+    discovery.pop("credentials", None)
+    return yaml.safe_dump(config, sort_keys=False)
+
+
 def create_stack(tmp_path: Path) -> Stack:
     """Derive a test project from the real Compose configuration.
 
@@ -160,7 +179,7 @@ def create_stack(tmp_path: Path) -> Stack:
     project = f"pyprom-test-{uuid.uuid4().hex[:12]}"
     environment = dict(os.environ)
     environment.update(
-        {"GRAFANA_ADMIN_USER": "admin", "GRAFANA_ADMIN_PASSWORD": TEST_PASSWORD, "TAPO_PLUG_DEVICES": "192.0.2.10"}
+        {"GRAFANA_ADMIN_USER": "admin", "GRAFANA_ADMIN_PASSWORD": TEST_PASSWORD, "TAPO_PLUG_DEVICES": ""}
     )
     env_file = tmp_path / "empty.env"
     env_file.touch()
@@ -187,8 +206,8 @@ def create_stack(tmp_path: Path) -> Stack:
     services = mapping(model["services"])
     exporter = mapping(services["exporter"])
     exporter_config = tmp_path / "exporter.yaml"
-    exporter_config.write_bytes((ROOT / "config/exporter.yaml").read_bytes())
-    # The production file has no hosts; environment credentials/hosts are never inherited.
+    exporter_config.write_text(isolated_exporter_configuration((ROOT / "config/exporter.yaml").read_text()))
+    # Neither user-edited YAML nor environment settings may send tests to real devices.
     exporter["environment"] = {"TP_LINK_USERNAME": "", "TP_LINK_PASSWORD": "", "TAPO_PLUG_DEVICES": ""}
     exporter["volumes"] = [
         {

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests.integration.support import ROOT, http, mapping, wait_for
+from tests.integration.test_stack_configuration import verify_published_image_device_configuration
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -132,6 +133,7 @@ def test_stack_provisions_queries_and_preserves_data_across_recreation(stack: St
     grafana = stack.url("grafana", 3000)
     # Execute the fixture scenarios; loading valid alert syntax alone cannot check their behavior.
     stack.compose("run", "--rm", "--no-deps", "promtool", "test", "rules", "/etc/prometheus/tests/alerts.test.yml")
+    verify_published_image_device_configuration(stack)
     config_before = stack.exporter_config.read_bytes()
     assert "--no-write-config" in stack.compose("run", "--rm", "--no-deps", "exporter", "--help")
     metrics = stack.compose(

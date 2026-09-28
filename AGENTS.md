@@ -7,7 +7,7 @@ The Python package supplies the `power-monitor` checkout utility; it does not im
 Device collection belongs to the separate `pyprom-exporters` project.
 
 - `compose.yaml`: pinned images, service configuration, health checks and persistent storage.
-- `config/exporter.yaml`: live probing, timeouts and concurrency; hosts and credentials come from `.env`.
+- `config/exporter.yaml`: device hosts, live probing, timeouts and concurrency; credentials stay in `.env`.
 - `prometheus/`: scrape configuration and alert rules.
 - `grafana/provisioning/`: datasource and dashboard providers.
 - `dash.json`: portable standalone dashboard with built-in Grafana panels.
@@ -25,6 +25,13 @@ and generated reports in ignored `report/`.
 `power-monitor init` creates a private `.env` with a generated password and preserves existing settings.
 Do not print or commit credentials. Explicit device hosts avoid dependence on broadcast discovery through Docker.
 Keep `.env.example` free of usable credentials.
+
+The recommended inventory is the tracked `config/exporter.yaml` list at `exporters.tapo.devices`,
+with one IP address or hostname per entry and optional inline comments. A nonempty `TAPO_PLUG_DEVICES` replaces
+that entire list; an unset or empty value uses YAML. Whitespace/comma-only overrides are invalid.
+`check` and `up` must validate the effective YAML/environment configuration and require at least one explicit host.
+Preserve the read-only YAML mount and `--no-write-config` so comments survive. YAML-only edits require exporter restart;
+environment changes require Compose `up` to recreate the container with its changed settings.
 
 `down` and the wrapper's `-r` must preserve persistent volumes. The explicit `reset --yes` command is the exception:
 it removes the selected Compose project's containers, non-external networks and managed data volumes.

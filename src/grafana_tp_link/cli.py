@@ -13,6 +13,8 @@ import subprocess  # nosec B404 # ruff: ignore[suspicious-subprocess-import]
 import sys
 from pathlib import Path
 
+import yaml
+
 SERVICES = ("exporter", "prometheus", "grafana")
 
 
@@ -76,7 +78,9 @@ def _initialize(directory: Path) -> None:
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines) + "\n")
     sys.stdout.write("Created .env with private permissions and a generated Grafana password.\n")
-    sys.stdout.write("Edit TAPO_PLUG_DEVICES and any required credentials before starting services.\n")
+    sys.stdout.write(
+        "Edit devices in config/exporter.yaml and any required credentials in .env before starting services.\n"
+    )
 
 
 def _run(arguments: list[str], directory: Path, *, environment: dict[str, str] | None = None) -> int:
@@ -92,6 +96,45 @@ def _run(arguments: list[str], directory: Path, *, environment: dict[str, str] |
         arguments, cwd=directory, check=False, env=environment
     )
     return result.returncode
+
+
+def _yaml_devices(directory: Path) -> list[str]:
+    """Read literal device hosts without rewriting YAML or losing comments.
+
+    Returns
+    -------
+    list[str]
+        Device hosts declared under exporters.tapo.devices.
+
+    Raises
+    ------
+    ValueError
+        If YAML syntax or a host entry is invalid.
+    TypeError
+        If the exporter configuration is not composed of nested mappings.
+    """
+    path = directory / "config" / "exporter.yaml"
+    try:
+        options = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (yaml.YAMLError, UnicodeError) as error:
+        message = "Invalid config/exporter.yaml; check its YAML syntax and UTF-8 encoding."
+        raise ValueError(message) from error
+    if options is None:
+        options = {}
+    message = "config/exporter.yaml must define exporters.tapo.devices as a list of individual IPs or hostnames."
+    for key in ("exporters", "tapo"):
+        if not isinstance(options, dict):
+            raise TypeError(message)
+        options = options.get(key, {})
+    if not isinstance(options, dict):
+        raise TypeError(message)
+    devices = options.get("devices", [])
+    if not isinstance(devices, list) or any(
+        not isinstance(host, str) or not host or "," in host or any(character.isspace() for character in host)
+        for host in devices
+    ):
+        raise ValueError(message)
+    return devices
 
 
 def _validate_configuration(compose: list[str], directory: Path) -> int:
@@ -113,18 +156,28 @@ def _validate_configuration(compose: list[str], directory: Path) -> int:
     if result.returncode:
         sys.stderr.write(
             f"Compose configuration failed (exit status {result.returncode}). "
-            "Check compose.yaml and .env, including TAPO_PLUG_DEVICES and GRAFANA_ADMIN_PASSWORD.\n"
+            "Check compose.yaml and .env, including GRAFANA_ADMIN_PASSWORD.\n"
         )
         return result.returncode
     try:
         model = json.loads(result.stdout)
-        devices = model["services"]["exporter"]["environment"]["TAPO_PLUG_DEVICES"]
-    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        override = model["services"]["exporter"].get("environment", {}).get("TAPO_PLUG_DEVICES")
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
         message = "Compose did not return the expected exporter environment configuration."
         raise ValueError(message) from error
-    if not isinstance(devices, str) or not devices.replace(",", " ").split():
-        message = "Set TAPO_PLUG_DEVICES to at least one explicit device IP or hostname before check/up."
+    if override is not None and not isinstance(override, str):
+        message = "Compose did not return the expected exporter environment configuration."
         raise ValueError(message)
+    yaml_devices = _yaml_devices(directory)
+    devices = override.replace(",", " ").split() if override else yaml_devices
+    if not devices:
+        message = (
+            "Configure at least one explicit device IP or hostname in config/exporter.yaml "
+            "under exporters.tapo.devices, or set TAPO_PLUG_DEVICES. Clear an empty whitespace/comma-only override."
+        )
+        raise ValueError(message)
+    if override:
+        sys.stdout.write("Using TAPO_PLUG_DEVICES; it overrides the YAML device list.\n")
     return 0
 
 
@@ -243,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
             _initialize(directory)
             return 0
         return _compose(arguments, directory)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, TypeError) as error:
         sys.stderr.write(f"{error}\n")
         return 1
     except KeyboardInterrupt:

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from tests.integration.support import mapping
+from tests.integration.support import TEST_PASSWORD, isolated_exporter_configuration, mapping
 from tests.integration.test_stack_smoke import expand, expressions
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +28,7 @@ def test_scraping_uses_single_exporter_and_a_compatible_deadline() -> None:
     config = mapping(yaml.safe_load((ROOT / "config/exporter.yaml").read_text()))
     exporter = mapping(mapping(config["exporters"])["tapo"])
     assert mapping(exporter["discovery_options"])["perform_discovery"] is False
-    assert exporter["devices"] == []
+    assert isinstance(exporter["devices"], list)
     timeout = mapping(prometheus["global"])["scrape_timeout"]
     interval = mapping(prometheus["global"])["scrape_interval"]
     assert float(str(mapping(exporter["prometheus_options"])["scrape_timeout"])) < float(
@@ -80,3 +80,27 @@ def test_dashboard_uses_native_units_host_identity_and_provisioned_datasource() 
         for energy_metric in ("current_consumption_today", "current_month_consumption"):
             assert f"rate({energy_metric}" not in expanded
             assert f"increase({energy_metric}" not in expanded
+
+
+def test_integration_configuration_removes_user_device_targets_and_credentials() -> None:
+    """User-edited device lists cannot make Docker tests probe real devices."""
+    original = {
+        "prometheus_port": 8090,
+        "exporters": {
+            "tapo": {
+                "devices": ["192.0.2.10"],
+                "max_concurrent_devices": 7,
+                "discovery_options": {
+                    "perform_discovery": True,
+                    "timeout": 4,
+                    "credentials": {"username": "fixture-user", "password": TEST_PASSWORD},
+                },
+            }
+        },
+    }
+    isolated = mapping(yaml.safe_load(isolated_exporter_configuration(yaml.safe_dump(original))))
+    exporter = mapping(mapping(isolated["exporters"])["tapo"])
+    assert exporter["devices"] == []
+    assert exporter["max_concurrent_devices"] == 7
+    assert exporter["discovery_options"] == {"perform_discovery": False, "timeout": 4}
+    assert isolated["prometheus_port"] == 8090

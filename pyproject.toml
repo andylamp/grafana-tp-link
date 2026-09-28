@@ -5,7 +5,7 @@ description = "A provisioned Grafana and Prometheus stack for pyprom-exporters s
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-3.0-only"
-dependencies = []
+dependencies = ["PyYAML>=6.0.3"]
 
 [project.scripts]
 power-monitor = "grafana_tp_link.cli:main"
@@ -16,7 +16,6 @@ dev = [
     "prek>=0.5.3",
     "pytest>=9.1.1",
     "pytest-xdist>=3.8.0",
-    "PyYAML>=6.0.3",
     "ruff>=0.16.9",
     "ty>=0.0.84",
 ]

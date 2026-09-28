@@ -31,6 +31,8 @@ def checkout(tmp_path: Path) -> Path:
     directory = tmp_path / "power monitor"
     directory.mkdir()
     (directory / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
+    (directory / "config").mkdir()
+    (directory / "config" / "exporter.yaml").write_text("exporters:\n  tapo:\n    devices: []\n", encoding="utf-8")
     (directory / ".env.example").write_text("GRAFANA_ADMIN_PASSWORD=\nTAPO_PLUG_DEVICES=\n", encoding="utf-8")
     return directory
 
@@ -333,3 +335,89 @@ def test_reset_removes_project_data_and_preserves_configuration(
         assert env_file.read_bytes() == settings
     else:
         assert not env_file.exists()
+
+
+@pytest.mark.parametrize("override", [None, ""])
+def test_yaml_devices_allow_startup_and_preserve_comments(
+    checkout: Path,
+    command_runner: Mock,
+    resolved_configuration: Mock,
+    override: str | None,
+) -> None:
+    """Unset and empty environment overrides select the editable YAML list."""
+    config = checkout / "config" / "exporter.yaml"
+    content = (
+        "# Device notes are preserved.\nexporters:\n  tapo:\n    devices:\n"
+        '      - "192.0.2.10"  # Office desk\n'
+        '      - "kitchen-plug.lan"  # Coffee machine\n'
+        '      # - "192.0.2.12"  # Temporarily disabled\n'
+    )
+    config.write_text(content, encoding="utf-8")
+    environment = {} if override is None else {"TAPO_PLUG_DEVICES": override}
+    resolved_configuration.return_value.stdout = json.dumps({"services": {"exporter": {"environment": environment}}})
+    for command in ("check", "up"):
+        assert cli.main(["--directory", str(checkout), command]) == 0
+    assert command_runner.call_count == 3
+    assert config.read_text(encoding="utf-8") == content
+
+
+@pytest.mark.parametrize("override", [" ", ",,,"])
+def test_invalid_environment_override_does_not_fall_back_to_yaml(
+    checkout: Path,
+    command_runner: Mock,
+    resolved_configuration: Mock,
+    override: str,
+) -> None:
+    """A nonempty override replaces YAML even when it resolves to no hosts."""
+    (checkout / "config" / "exporter.yaml").write_text(
+        "exporters:\n  tapo:\n    devices: [192.0.2.10]\n", encoding="utf-8"
+    )
+    resolved_configuration.return_value.stdout = json.dumps(
+        {"services": {"exporter": {"environment": {"TAPO_PLUG_DEVICES": override}}}}
+    )
+    assert cli.main(["--directory", str(checkout), "up"]) == 1
+    command_runner.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "- not-a-mapping\n",
+        "exporters: []\n",
+        "exporters: {tapo: false}\n",
+        "exporters: {tapo: {devices: 192.0.2.10}}\n",
+        "exporters: {tapo: {devices: [null]}}\n",
+        "exporters: {tapo: {devices: [123]}}\n",
+        'exporters: {tapo: {devices: [""]}}\n',
+        'exporters: {tapo: {devices: ["192.0.2.10 192.0.2.11"]}}\n',
+        'exporters: {tapo: {devices: ["192.0.2.10,192.0.2.11"]}}\n',
+        "exporters: {tapo: {devices: [{host: 192.0.2.10}]}}\n",
+    ],
+)
+def test_invalid_yaml_device_structure_cannot_launch_containers(
+    checkout: Path, command_runner: Mock, content: str
+) -> None:
+    """YAML must provide one nonempty IP or hostname string per list item."""
+    (checkout / "config" / "exporter.yaml").write_text(content, encoding="utf-8")
+    assert cli.main(["--directory", str(checkout), "up"]) == 1
+    command_runner.assert_not_called()
+
+
+def test_yaml_syntax_errors_do_not_expose_configuration_values(
+    checkout: Path, command_runner: Mock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Parser diagnostics cannot print private configuration contents."""
+    marker = "PRIVATE_TEST_VALUE"
+    (checkout / "config" / "exporter.yaml").write_text(f"credentials: [{marker}\n", encoding="utf-8")
+    assert cli.main(["--directory", str(checkout), "check"]) == 1
+    command_runner.assert_not_called()
+    output = capsys.readouterr()
+    assert "YAML syntax" in output.err
+    assert marker not in output.out + output.err
+
+
+def test_missing_exporter_configuration_cannot_launch_containers(checkout: Path, command_runner: Mock) -> None:
+    """An environment override does not mask a missing bind-mounted configuration file."""
+    (checkout / "config" / "exporter.yaml").unlink()
+    assert cli.main(["--directory", str(checkout), "up"]) == 1
+    command_runner.assert_not_called()
