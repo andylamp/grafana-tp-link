@@ -73,7 +73,8 @@ uv run --locked power-monitor up
 ```
 
 Open Grafana using `grafana.bind_address` and `grafana.port` from `config/stack.yaml`
-(normally `http://127.0.0.1:3000/`), and sign in as `admin`, or your configured `GRAFANA_ADMIN_USER`.
+(`http://localhost:3333/` with the checked-in configuration),
+and sign in as `admin`, or your configured `GRAFANA_ADMIN_USER`.
 The **TP-Link · Power & Energy** dashboard is provisioned automatically and selected as the home dashboard.
 No API registration script, manual datasource creation or dashboard upload is required.
 
@@ -165,10 +166,10 @@ Grafana's address/port, both services' storage locations, Prometheus retention, 
 Credentials stay in the private `.env`.
 Edit the existing YAML values and keep comments next to settings or individual device hosts.
 
-| YAML setting | Default | Meaning |
+| YAML setting | Checked-in value | Meaning |
 | --- | --- | --- |
-| `grafana.bind_address` | `127.0.0.1` | Host address serving Grafana |
-| `grafana.port` | `3000` | Host port serving Grafana |
+| `grafana.bind_address` | `localhost` | Host address serving Grafana; normalized to `127.0.0.1` |
+| `grafana.port` | `3333` | Host port serving Grafana |
 | `grafana.data_directory` | `null` | Docker volume; set a host directory to use a bind mount |
 | `prometheus.data_directory` | `null` | Docker volume; set a host directory to use a bind mount |
 | `prometheus.retention_time` | `3y` | Maximum stored history by age |
