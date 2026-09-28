@@ -1,8 +1,8 @@
 # Primary configuration for the monitoring stack. Keep credentials in .env.
 # Supported nonempty environment overrides take precedence over these settings.
 grafana:
-  bind_address: "127.0.0.1"
-  port: 3000
+  bind_address: "localhost"
+  port: 3333
   # null keeps Docker-managed storage; set a host directory such as ./data/grafana.
   data_directory: null
 prometheus:

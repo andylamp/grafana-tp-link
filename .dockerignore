@@ -1,1 +1,8 @@
 *
+.env*
+scratch*
+dist/*
+.pytest_cache/*
+.ruff_cache/*
+.github/*
+assets/*
