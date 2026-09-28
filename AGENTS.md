@@ -26,7 +26,12 @@ and generated reports in ignored `report/`.
 Do not print or commit credentials. Explicit device hosts avoid dependence on broadcast discovery through Docker.
 Keep `.env.example` free of usable credentials.
 
-`down` must preserve persistent volumes. Do not reintroduce blanket prune commands or deletion of data directories.
+`down` and the wrapper's `-r` must preserve persistent volumes. The explicit `reset --yes` command is the exception:
+it removes the selected Compose project's containers, non-external networks and managed data volumes.
+Reset must require `--yes`, preserve `.env`, source files, images, external volumes and host bind directories,
+and must not restart services automatically. `make reset` intentionally supplies `--yes`.
+Do not execute reset against an existing deployment as part of validation; use isolated integration resources.
+Do not reintroduce blanket prune commands or deletion of host data directories.
 Database migration is a separately documented operation on backed-up copies; do not perform it during development.
 Keep the exporter wait below the Prometheus timeout, and that timeout below the scrape interval.
 

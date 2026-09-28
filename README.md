@@ -84,19 +84,51 @@ uv run --locked --project /path/to/grafana-tp-link \
 | `uv run --locked power-monitor status` | Show service status |
 | `uv run --locked power-monitor logs --follow exporter` | Follow exporter logs |
 | `uv run --locked power-monitor down` | Stop this stack while retaining persistent volumes |
+| `uv run --locked power-monitor reset --yes` | Delete this project's containers and data volumes |
 | `uv run --locked power-monitor pull` | Download the pinned images |
 
 `make init`, `make up`, `make down`, `make status`, `make logs` and `make pull` provide equivalent shortcuts.
 The compatibility wrapper `./grafana-tp-link-docker -i` starts services and `-r` stops them while preserving data.
-Use `power-monitor init` first. The old destructive removal behavior has been removed.
+Use `power-monitor init` first. The wrapper's old destructive removal behavior has been removed;
+deleting monitoring data now requires the explicit reset command below.
 
 The Compose project is `tp-link-monitoring`, distinct from the legacy `grafana-tp-link` project.
-`status`, `logs`, `down` and `pull` also work without `.env`. If you originally set a custom
+`status`, `logs`, `down`, `reset --yes` and `pull` also work without `.env`. If you originally set a custom
 `COMPOSE_PROJECT_NAME`, retain that name in `.env` or export it in your shell to address the same stack.
 `check` and `up` require configured device hosts and validate the resolved settings before creating containers.
 
 Pulling downloads the versions recorded in `compose.yaml`; it does not select newer releases automatically.
 Review version and digest changes together, consult upstream upgrade notes, back up data, then run `pull` and `up`.
+
+### Reset for a fresh run
+
+**Reset deletes Prometheus history and Grafana's stored accounts, settings and dashboard copies.**
+Use it when you intend to discard this stack's persistent data, such as during local iteration:
+
+```sh
+uv run --locked power-monitor reset --yes
+uv run --locked power-monitor up
+```
+
+The equivalent Makefile shortcut supplies the required confirmation flag for you:
+
+```sh
+make reset && make up
+```
+
+`reset` requires `--yes` and has no interactive prompt; without that flag it refuses to proceed.
+It runs `docker compose down --volumes --remove-orphans` for the selected Compose project, removing its containers
+(including orphaned services), non-external networks, declared named volumes and attached anonymous volumes.
+It does not run a global Docker prune or restart services automatically.
+
+Your `.env`, tracked configuration, source files and downloaded images remain in place.
+External volumes and host bind-mounted directories are retained. With the standard named-volume configuration,
+the next `up` creates empty storage and provisions the checked-in dashboard and datasource again, using the admin
+credentials retained in `.env`. A deployment using bind-mounted data keeps that data; reset does not erase its host files.
+
+Reset also works if `.env` is missing. Preserve or export a custom `COMPOSE_PROJECT_NAME` to select the intended project;
+without that setting, the default project is selected. Recreate/configure `.env` before starting services again if needed.
+For an ordinary stop that retains monitoring data, use `down` or the wrapper's `-r` instead.
 
 ## Configuration
 

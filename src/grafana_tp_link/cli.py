@@ -1,6 +1,6 @@
 # Copyright (c) 2026 grafana-tp-link contributors
 # SPDX-License-Identifier: GPL-3.0-only
-"""Operate the checked-out Compose stack without deleting persistent data."""
+"""Operate the checked-out Compose stack, preserving data unless reset is explicitly requested."""
 
 from __future__ import annotations
 
@@ -33,6 +33,17 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("check", help="Validate Compose and Prometheus configuration without probing devices")
     commands.add_parser("up", help="Start services and wait for health checks")
     commands.add_parser("down", help="Stop this stack and preserve its persistent data volumes")
+    reset = commands.add_parser(
+        "reset",
+        help="Delete this stack's containers and stored Grafana/Prometheus data",
+        description=(
+            "Delete this Compose project's containers, networks and managed data volumes. "
+            "Keep local configuration, images, external volumes and host directories. Run up to start fresh."
+        ),
+    )
+    reset.add_argument(
+        "--yes", action="store_true", required=True, help="Confirm permanent deletion of this stack's data"
+    )
     commands.add_parser("status", help="Show service status")
     commands.add_parser("pull", help="Download the pinned service images")
     logs = commands.add_parser("logs", help="Show recent logs")
@@ -200,6 +211,7 @@ def _compose(arguments: argparse.Namespace, directory: Path) -> int:
         extra = {
             "up": ["up", "-d", "--wait", "--wait-timeout", "120"],
             "down": ["down"],
+            "reset": ["down", "--volumes", "--remove-orphans"],
             "status": ["ps"],
             "pull": ["pull"],
         }[command]

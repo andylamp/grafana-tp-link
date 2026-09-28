@@ -278,3 +278,58 @@ def test_resolved_configuration_is_captured_and_management_environment_is_forwar
     environment = {"TAPO_PLUG_DEVICES": "127.0.0.1"}
     assert cli._run(["/usr/bin/docker", "compose", "ps"], checkout, environment=environment) == 0
     assert resolved_configuration.call_args.kwargs["env"] == environment
+
+
+def test_reset_requires_explicit_confirmation_before_docker(
+    checkout: Path,
+    command_runner: Mock,
+    resolved_configuration: Mock,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Omitting confirmation cannot trigger any Docker operation or data removal."""
+    with pytest.raises(SystemExit) as error:
+        cli.main(["--directory", str(checkout), "reset"])
+    assert error.value.code == 2
+    assert "--yes" in capsys.readouterr().err
+    command_runner.assert_not_called()
+    resolved_configuration.assert_not_called()
+
+
+@pytest.mark.parametrize("has_env", [True, False])
+@pytest.mark.parametrize("exit_status", [0, 7])
+def test_reset_removes_project_data_and_preserves_configuration(
+    checkout: Path,
+    command_runner: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    has_env: bool,
+    exit_status: int,
+) -> None:
+    """Reset targets the selected project, retains local files and propagates Docker failures."""
+    env_file = checkout / ".env"
+    settings = env_file.read_bytes()
+    if not has_env:
+        env_file.unlink()
+    config_file = checkout / "compose.yaml"
+    configuration = config_file.read_bytes()
+    legacy_data = checkout / "data" / "legacy.txt"
+    legacy_data.parent.mkdir()
+    legacy_data.write_text("preserve host data", encoding="utf-8")
+    monkeypatch.setenv("COMPOSE_PROJECT_NAME", "isolated-reset-project")
+    command_runner.return_value = exit_status
+    assert cli.main(["--directory", str(checkout), "reset", "--yes"]) == exit_status
+    command_runner.assert_called_once()
+    arguments, directory = command_runner.call_args.args
+    assert directory == checkout
+    assert arguments[-3:] == ["down", "--volumes", "--remove-orphans"]
+    assert arguments[arguments.index("--project-directory") + 1] == str(checkout)
+    assert arguments[arguments.index("--env-file") + 1] == (str(env_file) if has_env else os.devnull)
+    assert arguments[arguments.index("-f") + 1] == "compose.yaml"
+    assert command_runner.call_args.kwargs["environment"]["COMPOSE_PROJECT_NAME"] == "isolated-reset-project"
+    assert not {"prune", "--rmi", "up", "rm"}.intersection(arguments)
+    assert config_file.read_bytes() == configuration
+    assert legacy_data.read_text(encoding="utf-8") == "preserve host data"
+    if has_env:
+        assert env_file.read_bytes() == settings
+    else:
+        assert not env_file.exists()
