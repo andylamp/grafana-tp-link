@@ -414,6 +414,16 @@ Ruff enables all stable and preview rules, ty checks Python, and Markdown uses t
 Python dependencies and tools are locked in `uv.lock`; update them with `uv lock --upgrade`, then rerun checks.
 Keep audit notes in ignored `scratch/` and generated reports in ignored `report/`.
 
+The **Code quality and tests** GitHub Actions workflow runs on pushes to every branch and on pull requests.
+Lint/format/type checks, Python 3.11–3.14 tests and package builds, and Docker integration tests run as parallel jobs.
+
+[Dependabot](.github/dependabot.yml) checks weekly and combines Python dependencies (including transitive dependencies),
+GitHub Actions, Compose images and prek hooks into one version-update PR, with at most one such PR open at a time.
+Security updates are grouped separately for Python and GitHub Actions, the ecosystems here that support them.
+[GitHub cannot combine security updates across ecosystems or with version updates](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-security-updates#about-grouped-security-updates),
+so security fixes may produce additional PRs. The version-update limit does not delay security updates.
+Dependabot configuration takes effect after it reaches the default branch.
+
 ## Repository layout
 
 - `compose.yaml`: pinned Compose services, volumes and health checks.

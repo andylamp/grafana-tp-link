@@ -1,20 +1,36 @@
 version: 2
 
-# Consolidate version updates for tools, hooks, workflows and images into one weekly PR.
+# One shared version-update PR for Python dependencies, actions, images and hooks.
+# GitHub requires security updates to use separate, per-ecosystem groups.
 multi-ecosystem-groups:
   dependencies:
     schedule:
       interval: weekly
+    open-pull-requests-limit: 1
+    commit-message:
+      prefix: chore(deps)
 
 updates:
   - package-ecosystem: uv
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: dependencies
+    # Include transitive lockfile dependencies as well as direct dependencies.
+    allow:
+      - dependency-type: all
+    groups:
+      python-security:
+        applies-to: security-updates
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /
     patterns: ["*"]
     multi-ecosystem-group: dependencies
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
+  # Docker Compose and pre-commit support version updates, not security updates.
   - package-ecosystem: docker-compose
     directory: /
     patterns: ["*"]
