@@ -130,10 +130,24 @@ def prepare_cli_stack(tmp_path: Path) -> tuple[Stack, dict[str, str]]:
     return instance, environment
 
 
-def cli(instance: Stack, environment: dict[str, str], command: str) -> None:
+def cli(
+    instance: Stack,
+    environment: dict[str, str],
+    command: str,
+    *arguments: str,
+    config: Path | None = None,
+) -> None:
     """Run the installed CLI against the disposable checkout and selected project."""
+    selection = ["--config", str(config)] if config is not None else []
     run(
-        [str(Path(sys.executable).with_name("power-monitor")), "--directory", str(instance.directory), command],
+        [
+            str(Path(sys.executable).with_name("power-monitor")),
+            "--directory",
+            str(instance.directory),
+            *selection,
+            command,
+            *arguments,
+        ],
         environment=environment,
     )
 
@@ -166,7 +180,12 @@ def verify_rendered_configuration(runtime: Path, *, port: int, level: str) -> No
     sources = datasource["datasources"]
     assert isinstance(sources, list)
     assert mapping(mapping(sources[0])["jsonData"])["timeInterval"] == mapping(prometheus["global"])["scrape_interval"]
-    assert {path.name for path in runtime.iterdir()} == {"exporter.yaml", "prometheus.yml", "datasource.yaml"}
+    assert {path.name for path in runtime.iterdir()} == {
+        "exporter.yaml",
+        "prometheus.yml",
+        "datasource.yaml",
+        "compose.storage.yaml",
+    }
     for path in runtime.iterdir():
         assert TEST_PASSWORD not in path.read_text()
         assert "fixture-login-only" not in path.read_text()

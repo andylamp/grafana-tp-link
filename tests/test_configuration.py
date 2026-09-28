@@ -107,9 +107,15 @@ def test_loading_preserves_source_comments_native_options_and_ignores_credential
 
 def test_every_supported_override_updates_its_effective_setting(checkout: Path) -> None:
     """Environment overrides replace YAML consistently across all supported settings."""
+    grafana_data = checkout / "grafana data"
+    prometheus_data = checkout / "prometheus data"
+    grafana_data.mkdir()
+    prometheus_data.mkdir()
     overrides = {
         "GRAFANA_BIND_ADDRESS": "::1",
         "GRAFANA_PORT": "3333",
+        "GRAFANA_DATA_DIRECTORY": str(grafana_data),
+        "PROMETHEUS_DATA_DIRECTORY": str(prometheus_data),
         "PROMETHEUS_RETENTION_TIME": "90d",
         "PROMETHEUS_RETENTION_SIZE": "1.5GB",
         "PROMETHEUS_SCRAPE_INTERVAL": "1m",
@@ -121,8 +127,9 @@ def test_every_supported_override_updates_its_effective_setting(checkout: Path) 
     }
     assert set(overrides) == set(configuration.OVERRIDE_NAMES)
     effective = configuration.load_configuration(checkout, overrides)
-    assert effective["grafana"] == {"bind_address": "::1", "port": 3333}
+    assert effective["grafana"] == {"bind_address": "::1", "port": 3333, "data_directory": str(grafana_data)}
     assert effective["prometheus"] == {
+        "data_directory": str(prometheus_data),
         "retention_time": "90d",
         "retention_size": "1.5GB",
         "scrape_interval": "1m",
@@ -267,7 +274,12 @@ def test_rendering_synchronizes_ports_and_intervals_without_modifying_sources(ch
     assert prometheus["scrape_configs"][0]["static_configs"] == [{"targets": ["exporter:18090"]}]
     assert datasource["datasources"][0]["jsonData"]["timeInterval"] == "1m"
     assert datasource["datasources"][0]["uid"] == "prometheus"
-    assert {path.name for path in runtime.iterdir()} == {"exporter.yaml", "prometheus.yml", "datasource.yaml"}
+    assert {path.name for path in runtime.iterdir()} == {
+        "exporter.yaml",
+        "prometheus.yml",
+        "datasource.yaml",
+        "compose.storage.yaml",
+    }
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o644 for path in runtime.iterdir())
     assert stat.S_IMODE(runtime.stat().st_mode) == 0o755
     assert {path: path.read_bytes() for path in before} == before
@@ -318,7 +330,7 @@ def test_concurrent_renderers_publish_one_complete_generation(checkout: Path) ->
         directories = {future.result() for future in futures}
     assert len(directories) == 1
     assert list((checkout / ".runtime").iterdir()) == list(directories)
-    assert len(list(next(iter(directories)).iterdir())) == 3
+    assert len(list(next(iter(directories)).iterdir())) == 4
 
 
 def test_failed_render_never_publishes_a_partial_generation(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -457,3 +469,79 @@ def test_valid_native_options_and_optional_defaults_remain_unchanged(
     tapo["discovery_options"] = None
     write_settings(checkout, settings)
     assert configuration.load_configuration(checkout, {})["exporter"] == settings["exporter"]
+
+
+@pytest.mark.parametrize("path_kind", ["relative", "absolute", "external"])
+def test_explicit_source_resolution_and_override_precedence(
+    checkout: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch, path_kind: str
+) -> None:
+    """Alternate paths select one complete stack document independently of the working directory."""
+    default = checkout / "config" / "stack.yaml"
+    original = default.read_bytes()
+    selected = (checkout.parent if path_kind == "external" else checkout) / "custom stack.yaml"
+    settings["grafana"]["port"] = 4321
+    settings["exporter"]["prometheus_port"] = 18090
+    settings["exporter"]["exporters"]["tapo"]["devices"] = ["192.0.2.80"]
+    content = "# Keep this alternate device inventory.\n" + yaml.safe_dump(settings)
+    selected.write_text(content, encoding="utf-8")
+    config_path = selected.relative_to(checkout) if path_kind == "relative" else selected
+    monkeypatch.chdir(checkout.parent)
+    effective = configuration.load_configuration(checkout, {}, config_path=config_path)
+    assert effective == settings
+    overridden = configuration.load_configuration(
+        checkout,
+        {"GRAFANA_PORT": "4555", "PROMETHEUS_PORT": "18190", "TAPO_PLUG_DEVICES": "192.0.2.81"},
+        config_path=config_path,
+    )
+    assert overridden["grafana"] == {"bind_address": "127.0.0.1", "port": 4555}
+    native = overridden["exporter"]
+    assert isinstance(native, dict)
+    assert native["prometheus_port"] == 18190
+    assert native["exporters"]["tapo"]["devices"] == ["192.0.2.81"]
+    assert selected.read_text(encoding="utf-8") == content
+    assert default.read_bytes() == original
+    assert not (checkout / ".runtime").exists()
+
+
+def test_explicit_source_does_not_read_default_or_legacy_config(checkout: Path, settings: Settings) -> None:
+    """Only the selected YAML document participates, even when conventional files are malformed."""
+    selected = checkout / "selected stack.yaml"
+    selected.write_text(yaml.safe_dump(settings), encoding="utf-8")
+    for name in ("stack.yaml", "exporter.yaml"):
+        (checkout / "config" / name).write_text("invalid YAML: [\n", encoding="utf-8")
+    assert configuration.load_configuration(checkout, {}, config_path=selected) == settings
+
+
+@pytest.mark.parametrize("selected_content", ["invalid YAML: [\n", "grafana: {port: 3333}\n"])
+def test_invalid_or_partial_selection_cannot_merge_with_default(checkout: Path, selected_content: str) -> None:
+    """Valid defaults cannot conceal malformed or incomplete explicit configuration."""
+    default = checkout / "config" / "stack.yaml"
+    original = default.read_bytes()
+    selected = checkout / "selected stack.yaml"
+    selected.write_text(selected_content, encoding="utf-8")
+    with pytest.raises(ValueError, match=r"YAML|mapping|settings"):
+        configuration.load_configuration(checkout, {}, config_path=selected)
+    assert default.read_bytes() == original
+    assert selected.read_text(encoding="utf-8") == selected_content
+
+
+def test_missing_selection_never_uses_available_default(checkout: Path) -> None:
+    """Explicit path typos fail instead of silently switching the monitored fleet."""
+    assert configuration.load_configuration(checkout, {})
+    with pytest.raises(FileNotFoundError):
+        configuration.load_configuration(checkout, {}, config_path=Path("missing stack.yaml"))
+    assert not (checkout / ".runtime").exists()
+
+
+def test_explicit_native_exporter_schema_explains_required_wrapper(checkout: Path, settings: Settings) -> None:
+    """Legacy exporter-only files receive migration guidance without implicit wrapping or merging."""
+    selected = checkout / "config" / "exporter.yaml"
+    content = yaml.safe_dump(settings["exporter"])
+    selected.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError, match="native exporter schema") as error:
+        configuration.load_configuration(checkout, {}, config_path=selected)
+    message = str(error.value).lower()
+    assert "native exporter" in message
+    assert "schema" in message
+    assert "section" in message
+    assert selected.read_text(encoding="utf-8") == content

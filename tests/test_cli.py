@@ -36,6 +36,7 @@ def checkout(tmp_path: Path) -> Path:
         shutil.copytree(ROOT / name, directory / name)
     config = directory / "config" / "stack.yaml"
     model = yaml.safe_load(config.read_text(encoding="utf-8"))
+    model["grafana"]["bind_address"] = "127.0.0.1"
     model["exporter"]["exporters"]["tapo"]["devices"] = []
     model["exporter"]["exporters"]["tapo"]["max_concurrent_devices"] = 10
     config.write_text(yaml.safe_dump(model), encoding="utf-8")
@@ -464,15 +465,22 @@ def test_compose_override_order_is_preserved_for_every_operation(
     if command == "reset":
         arguments.append("--yes")
     assert cli.main(arguments) == 0
+    expected_files = ["compose.yaml"]
+    if command in {"up", "check"}:
+        runtime = Path(command_runner.call_args.kwargs["environment"]["PYPROM_RUNTIME_DIR"])
+        storage = runtime / "compose.storage.yaml"
+        assert storage.is_file()
+        expected_files.append(str(storage))
+    expected_files.extend([str(checkout / relative), str(absolute)])
     for call in command_runner.call_args_list:
         process_arguments = call.args[0]
         files = [process_arguments[index + 1] for index, value in enumerate(process_arguments) if value == "-f"]
-        assert files == ["compose.yaml", str(checkout / relative), str(absolute)]
+        assert files == expected_files
     if command in {"up", "check"}:
         assert resolved_configuration.call_count == 2
         final_arguments = resolved_configuration.call_args.args[0]
         files = [final_arguments[index + 1] for index, value in enumerate(final_arguments) if value == "-f"]
-        assert files == ["compose.yaml", str(checkout / relative), str(absolute)]
+        assert files == expected_files
     else:
         resolved_configuration.assert_not_called()
 
@@ -561,3 +569,132 @@ def test_yaml_edits_change_runtime_mounts_for_next_up(checkout: Path, command_ru
         == 4
     )
     assert config.read_text(encoding="utf-8") == changed
+
+
+@pytest.fixture
+def outside_checkout(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise checkout-relative paths while running from another working directory."""
+    monkeypatch.chdir(checkout.parent)
+
+
+@pytest.mark.usefixtures("outside_checkout")
+@pytest.mark.parametrize("path_kind", ["relative", "absolute", "external"])
+@pytest.mark.parametrize("command", ["check", "up"])
+def test_selected_stack_path_uses_checkout_templates_and_preserves_both_sources(
+    checkout: Path,
+    command_runner: Mock,
+    resolved_configuration: Mock,
+    path_kind: str,
+    command: str,
+) -> None:
+    """Explicit stack files resolve against the checkout while generated files and credentials stay there."""
+    default = checkout / "config" / "stack.yaml"
+    original = default.read_bytes()
+    selected = (checkout.parent if path_kind == "external" else checkout) / "custom stack.yaml"
+    model = yaml.safe_load(original)
+    model["grafana"]["port"] = 4321
+    model["exporter"]["prometheus_port"] = 18090
+    model["exporter"]["exporters"]["tapo"]["devices"] = ["192.0.2.80"]
+    content = "# Preserve alternate device notes.\n" + yaml.safe_dump(model)
+    selected.write_text(content, encoding="utf-8")
+    argument = str(selected.relative_to(checkout)) if path_kind == "relative" else str(selected)
+    resolved_configuration.return_value.stdout = json.dumps({"services": {"settings": {"environment": {}}}})
+    assert cli.main(["--directory", str(checkout), "--config", argument, command]) == 0
+    environment = command_runner.call_args.kwargs["environment"]
+    assert environment["GRAFANA_PORT"] == "4321"
+    assert environment["PROMETHEUS_PORT"] == "18090"
+    assert environment["TAPO_PLUG_DEVICES"] == "192.0.2.80"
+    runtime = Path(environment["PYPROM_RUNTIME_DIR"])
+    assert runtime.parent == checkout / ".runtime"
+    native = yaml.safe_load((runtime / "exporter.yaml").read_text(encoding="utf-8"))
+    prometheus = yaml.safe_load((runtime / "prometheus.yml").read_text(encoding="utf-8"))
+    assert native["exporters"]["tapo"]["devices"] == ["192.0.2.80"]
+    assert native["prometheus_port"] == 18090
+    assert prometheus["scrape_configs"][0]["static_configs"][0]["targets"] == ["exporter:18090"]
+    for call in command_runner.call_args_list:
+        arguments, directory = call.args
+        assert directory == checkout
+        assert arguments[arguments.index("--env-file") + 1] == str(checkout / ".env")
+        assert arguments[arguments.index("--project-directory") + 1] == str(checkout)
+    assert selected.read_text(encoding="utf-8") == content
+    assert default.read_bytes() == original
+    assert not (checkout.parent / ".runtime").exists()
+
+
+def test_resolved_environment_still_overrides_explicit_stack_file(
+    checkout: Path, command_runner: Mock, resolved_configuration: Mock
+) -> None:
+    """Selecting another YAML file does not bypass shell or dotenv override precedence."""
+    default = checkout / "config" / "stack.yaml"
+    original = default.read_bytes()
+    selected = checkout / "selected stack.yaml"
+    model = yaml.safe_load(original)
+    model["grafana"]["port"] = 4321
+    model["exporter"]["prometheus_port"] = 18090
+    model["exporter"]["exporters"]["tapo"]["devices"] = ["192.0.2.80"]
+    content = "# Preserve selected settings.\n" + yaml.safe_dump(model)
+    selected.write_text(content, encoding="utf-8")
+    overrides = {"GRAFANA_PORT": "4555", "PROMETHEUS_PORT": "18190", "TAPO_PLUG_DEVICES": "192.0.2.81"}
+    resolved_configuration.return_value.stdout = json.dumps({"services": {"settings": {"environment": overrides}}})
+    assert cli.main(["--directory", str(checkout), "--config", str(selected), "up"]) == 0
+    environment = command_runner.call_args.kwargs["environment"]
+    assert all(environment[key] == value for key, value in overrides.items())
+    native = yaml.safe_load((Path(environment["PYPROM_RUNTIME_DIR"]) / "exporter.yaml").read_text(encoding="utf-8"))
+    assert native["prometheus_port"] == 18190
+    assert native["exporters"]["tapo"]["devices"] == ["192.0.2.81"]
+    assert selected.read_text(encoding="utf-8") == content
+    assert default.read_bytes() == original
+
+
+@pytest.mark.parametrize("selected_content", [None, "invalid YAML: [\n", "grafana: {port: 3333}\n"])
+@pytest.mark.parametrize("command", ["check", "up"])
+def test_invalid_explicit_config_never_falls_back_to_valid_default(
+    checkout: Path,
+    command_runner: Mock,
+    selected_content: str | None,
+    command: str,
+) -> None:
+    """Missing, malformed and partial selections cannot silently use the checkout's default settings."""
+    default = checkout / "config" / "stack.yaml"
+    valid = default.read_text(encoding="utf-8").replace("devices: []", "devices: [192.0.2.10]")
+    default.write_text(valid, encoding="utf-8")
+    selected = checkout / "selected stack.yaml"
+    if selected_content is not None:
+        selected.write_text(selected_content, encoding="utf-8")
+    assert cli.main(["--directory", str(checkout), "--config", str(selected), command]) == 1
+    command_runner.assert_not_called()
+    assert not (checkout / ".runtime").exists()
+    assert default.read_text(encoding="utf-8") == valid
+
+
+def test_native_exporter_selection_has_actionable_schema_guidance(
+    checkout: Path, command_runner: Mock, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An exporter-only file cannot masquerade as the unified stack schema."""
+    model = yaml.safe_load((checkout / "config" / "stack.yaml").read_text(encoding="utf-8"))
+    selected = checkout / "config" / "exporter.yaml"
+    selected.write_text(yaml.safe_dump(model["exporter"]), encoding="utf-8")
+    assert cli.main(["--directory", str(checkout), "--config", str(selected), "up"]) == 1
+    command_runner.assert_not_called()
+    output = capsys.readouterr().err.lower()
+    assert "native exporter" in output
+    assert "schema" in output
+    assert "section" in output
+    assert not (checkout / ".runtime").exists()
+
+
+@pytest.mark.parametrize("command", ["down", "reset", "status", "logs", "pull"])
+def test_recovery_ignores_missing_selected_config_and_credentials(
+    checkout: Path, command_runner: Mock, resolved_configuration: Mock, command: str
+) -> None:
+    """An explicit configuration path is unnecessary for operations that cannot create containers."""
+    (checkout / ".env").unlink()
+    (checkout / "config" / "stack.yaml").unlink()
+    arguments = ["--directory", str(checkout), "--config", "missing custom stack.yaml", command]
+    if command == "reset":
+        arguments.append("--yes")
+    assert cli.main(arguments) == 0
+    command_runner.assert_called_once()
+    resolved_configuration.assert_not_called()
+    assert not (checkout / ".runtime").exists()
+    assert not (checkout / ".env").exists()

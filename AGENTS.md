@@ -30,6 +30,14 @@ Keep `.env.example` free of usable credentials.
 The single user-facing configuration file is `config/stack.yaml`. Device inventory lives at
 `exporter.exporters.tapo.devices`, with one IP address or hostname per entry and optional inline comments.
 Grafana service settings and Prometheus retention/scrape settings live in the `grafana` and `prometheus` sections.
+Global `--config PATH` selects one complete stack YAML, resolved relative to the checkout or as an absolute path.
+Never merge a selected file with the default or a leftover native `config/exporter.yaml`; missing selections must fail.
+Native exporter-only files need an explicit migration into the stack YAML's `exporter` section.
+`grafana.data_directory` and `prometheus.data_directory` optionally select host storage; null or omission retains the
+existing named volumes. Resolve relative data paths from the checkout, even for a configuration outside it.
+Never create, chown, copy or delete user storage directories. Generated bind mounts must set `create_host_path: false`.
+Support corresponding nonempty `GRAFANA_DATA_DIRECTORY` and `PROMETHEUS_DATA_DIRECTORY` environment overrides.
+Normalize the literal `localhost` bind address to loopback without changing the source YAML.
 Keep only credentials active in `.env.example`; optional noncredential overrides must be commented out.
 Compose resolves shell variables ahead of `.env`; nonempty resolved overrides replace YAML, while empty values use YAML.
 A device override replaces the complete list; whitespace/comma-only overrides are invalid.
@@ -41,7 +49,8 @@ Never rewrite source YAML: preserve user comments and formatting. Mount generate
 recreating affected containers while preserving persistent data; do not require manual restarts.
 
 The utility always loads base `compose.yaml` first; repeatable global `--compose-file` options add files in the supplied
-order, resolving relative paths against the checkout. Honor those options for every lifecycle command, including reset.
+order, resolving relative paths against the checkout. For `check`/`up`, insert the generated `compose.storage.yaml`
+after the base and before explicit override files. Honor explicit overrides for every lifecycle command, including reset.
 Recovery commands (`down`, `reset`, `status`, `logs`, `pull`) must work without `.env` or valid user YAML and must retain
 project identity where available through `.env` or the shell's `COMPOSE_PROJECT_NAME`.
 

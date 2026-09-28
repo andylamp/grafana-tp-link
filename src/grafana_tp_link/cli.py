@@ -39,6 +39,12 @@ def _parser() -> argparse.ArgumentParser:
         "--directory", type=Path, default=Path.cwd(), help="Checkout directory (default: current directory)"
     )
     parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("config/stack.yaml"),
+        help="Stack YAML for check/up, relative to the checkout (default: config/stack.yaml)",
+    )
+    parser.add_argument(
         "--compose-file",
         type=Path,
         action="append",
@@ -52,7 +58,7 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("down", help="Stop this stack and preserve its persistent data volumes")
     reset = commands.add_parser(
         "reset",
-        help="Delete this stack's containers and stored Grafana/Prometheus data",
+        help="Delete this stack's containers and managed data volumes",
         description=(
             "Delete this Compose project's containers, networks and managed data volumes. "
             "Keep local configuration, images, external volumes and host directories. Run up to start fresh."
@@ -296,8 +302,10 @@ def _compose(arguments: argparse.Namespace, directory: Path) -> int:
         status, overrides = _resolve_overrides(compose, directory)
         if status:
             return status
-        configuration = load_configuration(directory, overrides)
+        configuration = load_configuration(directory, overrides, config_path=arguments.config)
         runtime = render_configuration(directory, configuration)
+        # Derived storage follows base defaults; explicit Compose overrides remain last.
+        files[2:2] = ["-f", str(runtime / "compose.storage.yaml")]
         environment = os.environ | compose_environment(configuration, runtime)
         active = [name for name, value in overrides.items() if value]
         if active:

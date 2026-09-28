@@ -7,12 +7,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
 from grafana_tp_link.configuration import load_configuration, render_configuration
+from tests.integration import support
 from tests.integration.support import TEST_PASSWORD, isolated_exporter_configuration, mapping, prepare_checkout
 from tests.integration.test_stack_smoke import expand, expressions
+
+if TYPE_CHECKING:
+    import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -110,3 +115,28 @@ def test_integration_configuration_removes_user_device_targets_and_credentials()
     assert exporter["max_concurrent_devices"] == 7
     assert exporter["discovery_options"] == {"perform_discovery": False, "timeout": 4}
     assert isolated["prometheus_port"] == 8090
+
+
+def test_integration_checkout_cannot_mount_user_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A user-edited data path is replaced by test-project volumes before Docker sees it."""
+    source = tmp_path / "source"
+    config = prepare_checkout(source)
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    marker = user_data / "keep.txt"
+    marker.write_text("Existing data must remain untouched.")
+    for service in ("grafana", "prometheus"):
+        mapping(config[service])["data_directory"] = str(user_data)
+    (source / "config/stack.yaml").write_text(yaml.safe_dump(config))
+    monkeypatch.setattr(support, "ROOT", source)
+    directory = tmp_path / "isolated"
+    prepare_checkout(directory)
+    effective = load_configuration(directory, {}, require_devices=False)
+    runtime = render_configuration(directory, effective)
+    storage = mapping(yaml.safe_load((runtime / "compose.storage.yaml").read_text()))
+    for service in ("grafana", "prometheus"):
+        volumes = mapping(mapping(storage["services"])[service])["volumes"]
+        assert isinstance(volumes, list)
+        assert mapping(volumes[0])["type"] == "volume"
+        assert mapping(volumes[0])["source"] == f"{service}-data"
+    assert marker.read_text() == "Existing data must remain untouched."

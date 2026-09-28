@@ -91,43 +91,41 @@ docker image inspect --format '{{.Config.User}}' \
 Adjust ownership of the working copy for your Docker environment; rootless Docker and user namespaces can change how
 container IDs map onto the host. Do not recursively change ownership of the original backup.
 
-After the copied store has passed the staged upgrade, create an ignored `compose.override.yaml`:
+After the copied store has passed the staged upgrade, set its path in the existing `prometheus` section of
+`config/stack.yaml` (or your selected stack YAML), retaining the section's other settings:
 
 ```yaml
-services:
-  prometheus:
-    volumes:
-      - type: bind
-        source: ./data/prometheus
-        target: /prometheus
-        bind:
-          create_host_path: false
+prometheus:
+  data_directory: ./data/prometheus
 ```
 
-The override replaces the storage mount with the matching container target while retaining the read-only configuration
-mounts. `create_host_path: false` makes a missing working directory fail rather than silently create empty storage.
-Compose's [merge rules][compose-merge] define this behavior.
-
-Pass the additional file through the utility so it renders service configuration before validating or starting:
+Relative paths resolve from the checkout, including when selecting a YAML file outside it. The generated bind mount
+uses `/prometheus` inside the container and retains the read-only configuration mounts.
+`create_host_path: false` makes a missing working directory fail rather than silently create empty storage.
+Validate and start through the utility so it renders configuration and storage settings:
 
 ```sh
-uv run --locked power-monitor --compose-file compose.override.yaml check
+uv run --locked power-monitor check
+uv run --locked power-monitor up
+```
+
+For an alternative stack file, use `power-monitor --config config.local.yaml check` and the same selection for `up`.
+A different YAML file does not select a different Compose project or migrate data. Select separate project names
+and separate storage when rehearsing an independent deployment. Do not substitute raw `docker compose up`, which
+skips rendering the unified configuration.
+
+If migrating from a previous local Compose storage override, remove the duplicate storage entries after transferring
+their paths into YAML. Explicit `--compose-file` overrides are applied last and can override generated YAML storage.
+Retain any unrelated custom options. Advanced service customization can still use:
+
+```sh
 uv run --locked power-monitor --compose-file compose.override.yaml up
-```
-
-The base `compose.yaml` is always loaded first. Additional paths are relative to the checkout; repeat `--compose-file`
-for multiple overrides, retaining their order. Include the same options for all lifecycle commands:
-
-```sh
-uv run --locked power-monitor --compose-file compose.override.yaml status
-uv run --locked power-monitor --compose-file compose.override.yaml logs prometheus
 uv run --locked power-monitor --compose-file compose.override.yaml down
 ```
 
-The utility does not automatically discover `compose.override.yaml`. Omitting the option selects the base named-volume
-configuration instead of your copied database. If intentionally resetting this deployment, include the override with
-`reset --yes` too; host bind-mounted database directories are retained by reset.
-Do not substitute raw `docker compose up`: it does not render the unified YAML configuration.
+The base Compose file is loaded first, generated storage follows for `check`/`up`, and explicit override files follow
+in order. Their [merge rules][compose-merge] apply. Retain the same explicit overrides for all lifecycle commands,
+including reset. YAML-selected host directories are retained by `reset --yes`, as are explicitly overridden bind mounts.
 
 Confirm that historical queries still work and that new `current_consumption` samples arrive before retiring the old
 installation. Keep the original backup for rollback; opening an upgraded store with an older binary is not a substitute
@@ -153,23 +151,17 @@ using Grafana environment settings or a read-only configuration mount. For examp
 copying its file or the database alone does not apply those settings.
 
 Once a copied SQLite data directory is verified with the target version, put it at an ignored path such as `data/grafana`.
-Add this service entry alongside any Prometheus override:
+Set its path in the existing `grafana` section of the same stack YAML:
 
 ```yaml
-services:
-  grafana:
-    volumes:
-      - type: bind
-        source: ./data/grafana
-        target: /var/lib/grafana
-        bind:
-          create_host_path: false
+grafana:
+  data_directory: ./data/grafana
 ```
 
-Merge both service entries into one `services` mapping if preserving both databases.
-Confirm that the copied data is writable by the pinned Grafana image's configured user and that the resolved mounts still
-include the rendered datasource configuration, dashboard provider and `dash.json`.
-Use the same utility commands with `--compose-file compose.override.yaml` shown above for this deployment.
+Confirm that the copied data is writable by the pinned Grafana image's configured user. The utility retains the
+rendered datasource configuration, dashboard provider and `dash.json` mounts. Use the same `check` and `up` commands
+shown above, including `--config` when selecting a custom stack file. If you require additional Grafana environment or
+configuration mounts, retain those in your explicit `--compose-file` override and pass it to each lifecycle command.
 
 Changing `GRAFANA_ADMIN_PASSWORD` in `.env` does not reset an existing database's administrator password.
 Use the existing account or Grafana's documented reset procedure. Review datasource UID `prometheus`, folder UID
@@ -197,7 +189,8 @@ YAML, while whitespace/comma-only lists are rejected. `check` and `up` require a
 Use `power-monitor check`, then `power-monitor up` after YAML or environment changes. The utility writes credential-free
 native configuration into ignored `.runtime/<digest>/` directories, preserving the source YAML and its comments.
 Changed mount paths cause `up` to recreate affected containers with their existing data volumes; no manual restart is needed.
-For copied-data deployments, include the same `--compose-file compose.override.yaml` option on both commands.
+The same selected YAML also controls both data directories; include `--config` on both commands when using a custom file.
+Explicit Compose overrides, if still needed for advanced settings, follow generated storage settings.
 
 The default scrape timeout is 25 seconds, its interval is 30 seconds, and the exporter's live-refresh wait is 20 seconds.
 The renderer keeps the scrape target and Grafana datasource interval aligned with your YAML configuration.

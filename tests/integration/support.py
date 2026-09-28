@@ -191,6 +191,9 @@ def prepare_checkout(directory: Path) -> dict[str, object]:
         shutil.copyfile(ROOT / name, directory / name)
     (directory / "config").mkdir()
     config = mapping(yaml.safe_load((ROOT / "config/stack.yaml").read_text()))
+    # User-selected host storage must never be mounted into a disposable test project.
+    for service in ("grafana", "prometheus"):
+        mapping(config[service])["data_directory"] = None
     native = yaml.safe_dump(config["exporter"])
     config["exporter"] = mapping(yaml.safe_load(isolated_exporter_configuration(native)))
     (directory / "config/stack.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
@@ -247,6 +250,8 @@ def create_stack(tmp_path: Path) -> Stack:
                     project,
                     "-f",
                     str(tmp_path / "compose.yaml"),
+                    "-f",
+                    str(runtime / "compose.storage.yaml"),
                     "config",
                     "--format",
                     "json",

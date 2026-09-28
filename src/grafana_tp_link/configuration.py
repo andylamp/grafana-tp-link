@@ -21,8 +21,10 @@ from yaml.resolver import BaseResolver
 OVERRIDE_PATHS = {
     "GRAFANA_BIND_ADDRESS": ("grafana", "bind_address"),
     "GRAFANA_PORT": ("grafana", "port"),
+    "GRAFANA_DATA_DIRECTORY": ("grafana", "data_directory"),
     "PROMETHEUS_RETENTION_TIME": ("prometheus", "retention_time"),
     "PROMETHEUS_RETENTION_SIZE": ("prometheus", "retention_size"),
+    "PROMETHEUS_DATA_DIRECTORY": ("prometheus", "data_directory"),
     "PROMETHEUS_SCRAPE_INTERVAL": ("prometheus", "scrape_interval"),
     "PROMETHEUS_SCRAPE_TIMEOUT": ("prometheus", "scrape_timeout"),
     "PROMETHEUS_EVALUATION_INTERVAL": ("prometheus", "evaluation_interval"),
@@ -184,7 +186,9 @@ def _validate_tree(value: object, ancestors: set[int] | None = None) -> None:
         raise ValueError(message)
 
 
-def _require_keys(options: dict[str, object], keys: set[str], location: str) -> None:
+def _require_keys(
+    options: dict[str, object], keys: set[str], location: str, *, optional: set[str] | None = None
+) -> None:
     """Reject missing or unknown stack settings without echoing their values.
 
     Raises
@@ -192,8 +196,11 @@ def _require_keys(options: dict[str, object], keys: set[str], location: str) -> 
     ValueError
         If settings differ from the supported keys.
     """
-    if options.keys() != keys:
+    optional = optional or set()
+    if options.keys() - optional != keys:
         message = f"{location} must contain exactly these settings: {', '.join(sorted(keys))}."
+        if optional:
+            message += f" Also permitted: {', '.join(sorted(optional))}."
         raise ValueError(message)
 
 
@@ -331,6 +338,27 @@ def _host(value: object) -> bool:
         return True
 
 
+def _data_directory(value: object, location: str) -> str | None:
+    """Accept a host directory path or explicit named-volume default.
+
+    Returns
+    -------
+    str | None
+        The unmodified path string, or None for a managed volume.
+
+    Raises
+    ------
+    ValueError
+        If a path is empty, not text, or contains a NUL character.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip() or "\0" in value:
+        message = f"{location}.data_directory must be null or a nonempty path without NUL characters."
+        raise ValueError(message)
+    return value
+
+
 def _validate_grafana(options: dict[str, object]) -> None:
     """Validate the UI address without resolving DNS or binding sockets.
 
@@ -341,12 +369,15 @@ def _validate_grafana(options: dict[str, object]) -> None:
     TypeError
         If the bind address is not text.
     """
-    _require_keys(options, GRAFANA_KEYS, "grafana")
+    _require_keys(options, GRAFANA_KEYS, "grafana", optional={"data_directory"})
+    _data_directory(options.get("data_directory"), "grafana")
     _port(options["port"], "grafana.port")
     value = options["bind_address"]
     if not isinstance(value, str):
         message = "grafana.bind_address must be an IPv4 or IPv6 address."
         raise TypeError(message)
+    if value.casefold().removesuffix(".") == "localhost":
+        value = "127.0.0.1"
     try:
         options["bind_address"] = str(ipaddress.ip_address(value.removeprefix("[").removesuffix("]")))
     except ValueError as error:
@@ -439,10 +470,11 @@ def _validate(configuration: dict[str, object], *, require_devices: bool) -> Non
         If settings, durations, or the shared scrape budget are invalid.
     """
     _validate_tree(configuration)
-    _require_keys(configuration, {"grafana", "prometheus", "exporter"}, "config/stack.yaml")
+    _require_keys(configuration, {"grafana", "prometheus", "exporter"}, "Stack configuration")
     _validate_grafana(_mapping(configuration["grafana"], "grafana"))
     prometheus = _mapping(configuration["prometheus"], "prometheus")
-    _require_keys(prometheus, PROMETHEUS_KEYS, "prometheus")
+    _require_keys(prometheus, PROMETHEUS_KEYS, "prometheus", optional={"data_directory"})
+    _data_directory(prometheus.get("data_directory"), "prometheus")
     timings = {
         key: _duration_seconds(prometheus[key], f"prometheus.{key}") for key in PROMETHEUS_KEYS - {"retention_size"}
     }
@@ -454,16 +486,23 @@ def _validate(configuration: dict[str, object], *, require_devices: bool) -> Non
 
 
 def load_configuration(
-    directory: Path, overrides: dict[str, str], *, require_devices: bool = True
+    directory: Path,
+    overrides: dict[str, str],
+    *,
+    config_path: Path | None = None,
+    require_devices: bool = True,
 ) -> dict[str, object]:
     """Load unified YAML and apply supported nonempty environment overrides.
 
     Parameters
     ----------
     directory : Path
-        Repository checkout containing config/stack.yaml.
+        Checkout used to resolve relative configuration paths.
     overrides : dict[str, str]
         Effective environment values resolved by the caller; credentials are ignored.
+    config_path : Path | None
+        Selected stack YAML, relative to the checkout or absolute. Defaults to config/stack.yaml.
+        Only this file is loaded; default and legacy files are not merged.
     require_devices : bool
         Require at least one explicit host. Disable only for offline rendering/tests.
 
@@ -471,9 +510,22 @@ def load_configuration(
     -------
     dict[str, object]
         Validated grafana, prometheus and native exporter settings.
+
+    Raises
+    ------
+    ValueError
+        If the selected document uses the native exporter schema instead of the stack schema.
     """
-    configuration = _read_mapping(directory / "config" / "stack.yaml", "config/stack.yaml")
+    selected = (directory / (config_path if config_path is not None else Path("config/stack.yaml"))).resolve()
+    configuration = _read_mapping(selected, f"stack configuration {selected}")
     _validate_tree(configuration)
+    if "exporters" in configuration and "exporter" not in configuration:
+        message = (
+            "Selected file uses the native exporter schema. Move its settings under the 'exporter' section "
+            "of a stack configuration containing 'grafana' and 'prometheus' sections."
+        )
+        raise ValueError(message)
+    _require_keys(configuration, {"grafana", "prometheus", "exporter"}, "Stack configuration")
     _native_sections(configuration)
     _apply_overrides(configuration, overrides)
     _validate(configuration, require_devices=require_devices)
@@ -561,6 +613,29 @@ def _datasource_document(directory: Path, configuration: dict[str, object]) -> d
     return document
 
 
+def _storage_document(directory: Path, configuration: dict[str, object]) -> dict[str, object]:
+    """Choose managed volumes or host binds without creating storage directories.
+
+    Returns
+    -------
+    dict[str, object]
+        Compose overrides with literal, checkout-relative host paths resolved to absolute paths.
+    """
+    services = {}
+    for service, target in (("grafana", "/var/lib/grafana"), ("prometheus", "/prometheus")):
+        options = _mapping(configuration[service], service)
+        data_directory = _data_directory(options.get("data_directory"), service)
+        mount: dict[str, object] = {"type": "volume", "source": f"{service}-data", "target": target}
+        if data_directory is not None:
+            # Compose interpolates even quoted YAML values; dollar signs in paths must stay literal.
+            # Keep daemon-side paths literal: resolving local symlinks could redirect a remote bind.
+            absolute_path = os.path.abspath(directory / data_directory)  # ruff: ignore[os-path-abspath]
+            source = absolute_path.replace("$", "$$")
+            mount.update(type="bind", source=source, bind={"create_host_path": False})
+        services[service] = {"volumes": [mount]}
+    return {"services": services}
+
+
 def _verify_existing(destination: Path, files: dict[str, bytes]) -> None:
     """Refuse to change an existing rendered configuration generation.
 
@@ -627,7 +702,7 @@ def _publish_files(directory: Path, files: dict[str, bytes]) -> Path:
 
 
 def render_configuration(directory: Path, configuration: dict[str, object]) -> Path:
-    """Publish native exporter, Prometheus and datasource files without credentials.
+    """Publish native service configuration and storage overrides without credentials.
 
     Parameters
     ----------
@@ -639,7 +714,7 @@ def render_configuration(directory: Path, configuration: dict[str, object]) -> P
     Returns
     -------
     Path
-        Immutable content-addressed directory containing all three rendered YAML files.
+        Immutable content-addressed directory containing all four rendered YAML files.
     """
     effective = copy.deepcopy(configuration)
     _validate(effective, require_devices=False)
@@ -647,6 +722,7 @@ def render_configuration(directory: Path, configuration: dict[str, object]) -> P
         "exporter.yaml": _mapping(effective["exporter"], "exporter"),
         "prometheus.yml": _prometheus_document(directory, effective),
         "datasource.yaml": _datasource_document(directory, effective),
+        "compose.storage.yaml": _storage_document(directory, effective),
     }
     files = {name: yaml.safe_dump(document, sort_keys=True).encode("utf-8") for name, document in documents.items()}
     return _publish_files(directory, files)

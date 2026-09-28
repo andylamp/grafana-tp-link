@@ -3,12 +3,16 @@
 grafana:
   bind_address: "127.0.0.1"
   port: 3000
+  # null keeps Docker-managed storage; set a host directory such as ./data/grafana.
+  data_directory: null
 prometheus:
   retention_time: "3y"
   retention_size: "10GB"
   scrape_interval: "30s"
   scrape_timeout: "25s"
   evaluation_interval: "30s"
+  # null keeps Docker-managed storage; set a host directory such as ./data/prometheus.
+  data_directory: null
 exporter:
   prometheus_port: 8090
   log_level: INFO

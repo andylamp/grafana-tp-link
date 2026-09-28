@@ -121,15 +121,16 @@ uv run --locked power-monitor --compose-file compose.override.yaml up
 uv run --locked power-monitor --compose-file compose.override.yaml down
 ```
 
-Paths are relative to the checkout; repeat `--compose-file` for additional files. The utility always loads the base
-`compose.yaml` first. Retain these options for `check`, `status`, `logs`, `reset` and other lifecycle commands too.
+Paths are relative to the checkout; repeat `--compose-file` for additional files. The utility loads the base
+`compose.yaml`, then generated storage settings for `check`/`up`, then explicit overrides in the supplied order.
+Retain override options for `check`, `status`, `logs`, `reset` and other lifecycle commands too.
 
 Pulling downloads the versions recorded in `compose.yaml`; it does not select newer releases automatically.
 Review version and digest changes together, consult upstream upgrade notes, back up data, then run `pull` and `up`.
 
 ### Reset for a fresh run
 
-**Reset deletes Prometheus history and Grafana's stored accounts, settings and dashboard copies.**
+**For managed Docker volumes, reset deletes Prometheus history and Grafana's stored accounts and settings.**
 Use it when you intend to discard this stack's persistent data, such as during local iteration:
 
 ```sh
@@ -160,13 +161,16 @@ For an ordinary stop that retains monitoring data, use `down` or the wrapper's `
 ## Configuration
 
 [config/stack.yaml](config/stack.yaml) is the single user-facing file for device inventory, exporter behavior,
-Grafana's address/port, Prometheus retention, and scrape/evaluation intervals. Credentials stay in the private `.env`.
+Grafana's address/port, both services' storage locations, Prometheus retention, and scrape/evaluation intervals.
+Credentials stay in the private `.env`.
 Edit the existing YAML values and keep comments next to settings or individual device hosts.
 
 | YAML setting | Default | Meaning |
 | --- | --- | --- |
 | `grafana.bind_address` | `127.0.0.1` | Host address serving Grafana |
 | `grafana.port` | `3000` | Host port serving Grafana |
+| `grafana.data_directory` | `null` | Docker volume; set a host directory to use a bind mount |
+| `prometheus.data_directory` | `null` | Docker volume; set a host directory to use a bind mount |
 | `prometheus.retention_time` | `3y` | Maximum stored history by age |
 | `prometheus.retention_size` | `10GB` | Maximum stored blocks by size |
 | `prometheus.scrape_interval` | `30s` | Time between exporter scrapes |
@@ -193,7 +197,7 @@ Use Grafana's account-management or password-reset facilities for an existing in
 Docker administrators can inspect container environment variables; keep `.env` private.
 
 `check` and `up` generate read-only native service files under ignored `.runtime/<digest>/`.
-The utility does not rewrite `config/stack.yaml`, so inline comments and formatting survive.
+The utility does not rewrite the selected YAML, so inline comments and formatting survive.
 Generated files contain no account credentials and should not be edited or committed.
 The tracked Prometheus and Grafana provisioning files are implementation templates; ordinary configuration changes
 belong in `config/stack.yaml`. The renderer keeps the exporter target and Grafana datasource interval aligned.
@@ -210,13 +214,63 @@ Changes to generated service files produce different mount paths; port and reten
 Use these utility commands to prepare configuration before starting services; a raw `docker compose up` skips that
 preparation. Include your `--compose-file` options when using local overrides.
 
-Grafana binds to the local host by default. For remote access, configure a suitable bind address and your network's
-access controls, or place it behind an authenticated TLS reverse proxy. Prometheus and the exporter are available only
-on the Compose network; their ports are not published to the host.
+Grafana binds to the local host by default; `localhost` is normalized to `127.0.0.1`. For remote access, configure a
+suitable bind address and your network's access controls, or place it behind an authenticated TLS reverse proxy.
+Prometheus and the exporter are available only on the Compose network; their ports are not published to the host.
 
 Prometheus removes older blocks when either retention limit is reached. The size setting does not cap all disk use:
 allow additional space for the write-ahead log, active samples and compaction. Volumes persist across `down` and `up`.
 Use the explicit reset command only when you intend to discard that data.
+
+### Selecting a configuration
+
+The default is `config/stack.yaml`. Use the global `--config` option to select a complete alternative stack YAML:
+
+```sh
+cp config/stack.yaml config.local.yaml
+uv run --locked power-monitor --config config.local.yaml check
+uv run --locked power-monitor --config config.local.yaml up
+```
+
+Relative configuration paths are resolved against the checkout selected by `--directory`, not the shell's current directory.
+Absolute paths also work. Only the selected YAML is loaded; missing or invalid selections never fall back to the default.
+Use the same selection for subsequent `check` and `up` commands. Credentials still come from that checkout's `.env` or shell.
+The ignored generated configurations remain under that checkout's `.runtime/`.
+
+The old `config/exporter.yaml` has been consolidated into the stack YAML's `exporter` section.
+Its native settings are preserved when generating the configuration mounted inside the exporter container.
+A native exporter-only YAML is not a complete stack configuration; put its contents under `exporter` alongside `grafana`
+and `prometheus`. The utility never implicitly reads or merges a leftover `config/exporter.yaml`.
+
+Selecting another YAML changes settings for the same Compose project; it does not create an isolated deployment.
+Use distinct `COMPOSE_PROJECT_NAME` values and distinct storage when running independent deployments.
+Recovery commands can accept `--config` but do not read it, so broken or missing YAML cannot block stopping the project.
+
+### Storage locations
+
+Set `grafana.data_directory` and `prometheus.data_directory` in the selected YAML. With `null` (the default), Docker
+manages the existing `grafana-data` and `prometheus-data` volumes. No data is moved by adding these settings.
+To use host directories, edit these fields in the existing sections while retaining their other settings:
+
+```yaml
+grafana:
+  data_directory: ./data/grafana
+prometheus:
+  data_directory: ./data/prometheus
+```
+
+Relative data paths are resolved against the checkout, including when the selected YAML is elsewhere. Absolute paths
+also work. The containers keep their native paths: Grafana writes to `/var/lib/grafana` and Prometheus to `/prometheus`.
+Create the host directories on the Docker host and make them writable by the respective container users before starting.
+The utility never creates, changes ownership of, copies or deletes host data directories; missing bind directories make
+startup fail instead of creating empty storage. `check` runs Prometheus validation, but does not test Grafana's storage
+permissions or start Grafana.
+
+Apply changes with `power-monitor --config config.local.yaml check` and `power-monitor --config config.local.yaml up`
+(or omit `--config` for the default file). Storage selection is generated from YAML; no Compose override is needed.
+Changing a directory selects a different store and does not migrate the previous data. Follow the
+[migration guide](docs/migration.md) when retaining an existing installation.
+`reset --yes` removes this project's managed Docker volumes but retains host directories and their contents.
 
 ### Optional environment overrides
 
@@ -229,6 +283,8 @@ An empty or unset override uses YAML. Remove or unset an old override when you w
 | `TAPO_PLUG_DEVICES` | `exporter.exporters.tapo.devices` |
 | `PYPROM_EXPORTERS_LOG_LEVEL` | `exporter.log_level` |
 | `GRAFANA_BIND_ADDRESS`, `GRAFANA_PORT` | `grafana.bind_address`, `grafana.port` |
+| `GRAFANA_DATA_DIRECTORY` | `grafana.data_directory` |
+| `PROMETHEUS_DATA_DIRECTORY` | `prometheus.data_directory` |
 | `PROMETHEUS_RETENTION_TIME`, `PROMETHEUS_RETENTION_SIZE` | `prometheus.retention_time`, `prometheus.retention_size` |
 | `PROMETHEUS_PORT` | `exporter.prometheus_port` |
 | `PROMETHEUS_SCRAPE_INTERVAL` | `prometheus.scrape_interval` |
