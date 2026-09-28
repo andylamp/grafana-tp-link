@@ -224,18 +224,40 @@ Use the explicit reset command only when you intend to discard that data.
 
 ### Selecting a configuration
 
-The default is `config/stack.yaml`. Use the global `--config` option to select a complete alternative stack YAML:
+The default is `config/stack.yaml`. For custom configurations, keep complete YAML copies in `scratch/configs/`.
+The entire `scratch/` directory is excluded by both `.gitignore` and `.dockerignore`, keeping local profiles
+out of commits and Docker build contexts.
+From the repository root, create a profile:
 
 ```sh
-cp config/stack.yaml config.local.yaml
-uv run --locked power-monitor --config config.local.yaml check
-uv run --locked power-monitor --config config.local.yaml up
+mkdir -p scratch/configs
+cp config/stack.yaml scratch/configs/home.yaml
 ```
+
+Edit `scratch/configs/home.yaml` to configure your device hosts, storage directories, ports and scrape settings.
+Keep its `grafana`, `prometheus` and `exporter` sections; inline comments can describe local settings and devices.
+Credentials remain in the checkout's `.env` or shell environment. If `.env` does not exist yet, run
+`uv run --locked power-monitor init` and configure credentials as described in [Quick start](#quick-start).
+
+Validate and start using the global `--config` option before the command:
+
+```sh
+uv run --locked power-monitor --config scratch/configs/home.yaml check
+uv run --locked power-monitor --config scratch/configs/home.yaml up
+```
+
+Create additional copies such as `scratch/configs/lab.yaml` as needed, and pass the chosen file explicitly each time.
+Profiles are not discovered automatically. Supported nonempty environment overrides still take precedence over
+profile values; remove old overrides when you want the YAML values to apply.
+For a single local configuration, `config.local.yaml` in the repository root is also Git-ignored and can be selected
+with `--config config.local.yaml`.
 
 Relative configuration paths are resolved against the checkout selected by `--directory`, not the shell's current directory.
 Absolute paths also work. Only the selected YAML is loaded; missing or invalid selections never fall back to the default.
 Use the same selection for subsequent `check` and `up` commands. Credentials still come from that checkout's `.env` or shell.
 The ignored generated configurations remain under that checkout's `.runtime/`.
+Relative storage paths also use the checkout root: `./data/grafana` means `<checkout>/data/grafana` even for a profile
+in `scratch/configs/`.
 
 The old `config/exporter.yaml` has been consolidated into the stack YAML's `exporter` section.
 Its native settings are preserved when generating the configuration mounted inside the exporter container.
