@@ -12,8 +12,16 @@ import shutil
 import subprocess  # nosec B404 # ruff: ignore[suspicious-subprocess-import]
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import yaml
+
+from grafana_tp_link.configuration import (
+    OVERRIDE_NAMES,
+    compose_environment,
+    load_configuration,
+    render_configuration,
+)
 
 SERVICES = ("exporter", "prometheus", "grafana")
 
@@ -29,6 +37,13 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--directory", type=Path, default=Path.cwd(), help="Checkout directory (default: current directory)"
+    )
+    parser.add_argument(
+        "--compose-file",
+        type=Path,
+        action="append",
+        default=[],
+        help="Additional Compose override file, relative to the checkout (repeatable)",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="Create a private .env once; preserve any existing configuration")
@@ -78,9 +93,7 @@ def _initialize(directory: Path) -> None:
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines) + "\n")
     sys.stdout.write("Created .env with private permissions and a generated Grafana password.\n")
-    sys.stdout.write(
-        "Edit devices in config/exporter.yaml and any required credentials in .env before starting services.\n"
-    )
+    sys.stdout.write("Edit settings in config/stack.yaml and credentials in .env before starting services.\n")
 
 
 def _run(arguments: list[str], directory: Path, *, environment: dict[str, str] | None = None) -> int:
@@ -98,90 +111,82 @@ def _run(arguments: list[str], directory: Path, *, environment: dict[str, str] |
     return result.returncode
 
 
-def _yaml_devices(directory: Path) -> list[str]:
-    """Read literal device hosts without rewriting YAML or losing comments.
+def _resolve_overrides(compose: list[str], directory: Path) -> tuple[int, dict[str, str]]:
+    """Use Compose's own dotenv and shell precedence without displaying values.
 
     Returns
     -------
-    list[str]
-        Device hosts declared under exporters.tapo.devices.
+    tuple[int, dict[str, str]]
+        Compose's exit status and supported noncredential environment overrides.
 
     Raises
     ------
     ValueError
-        If YAML syntax or a host entry is invalid.
-    TypeError
-        If the exporter configuration is not composed of nested mappings.
+        If Compose returns an unexpected configuration structure.
     """
-    path = directory / "config" / "exporter.yaml"
+    probe = {
+        "name": "power-monitor-settings",
+        "services": {
+            "settings": {
+                "image": "scratch",
+                "environment": {name: "${" + name + ":-}" for name in OVERRIDE_NAMES},
+            }
+        },
+    }
+    # This file contains variable references only. Config resolution never starts a container.
+    with TemporaryDirectory(prefix="power-monitor-settings-") as temporary:
+        path = Path(temporary) / "compose.yaml"
+        path.write_text(yaml.safe_dump(probe), encoding="utf-8")
+        result = subprocess.run(  # nosec B603 # ruff: ignore[subprocess-without-shell-equals-true]
+            [*compose, "-f", str(path), "config", "--format", "json"],
+            cwd=directory,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    if result.returncode:
+        sys.stderr.write(
+            f"Compose configuration failed (exit status {result.returncode}). Check .env and shell settings.\n"
+        )
+        return result.returncode, {}
     try:
-        options = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (yaml.YAMLError, UnicodeError) as error:
-        message = "Invalid config/exporter.yaml; check its YAML syntax and UTF-8 encoding."
+        environment = json.loads(result.stdout)["services"]["settings"]["environment"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        message = "Compose did not return the expected settings environment configuration."
         raise ValueError(message) from error
-    if options is None:
-        options = {}
-    message = "config/exporter.yaml must define exporters.tapo.devices as a list of individual IPs or hostnames."
-    for key in ("exporters", "tapo"):
-        if not isinstance(options, dict):
-            raise TypeError(message)
-        options = options.get(key, {})
-    if not isinstance(options, dict):
-        raise TypeError(message)
-    devices = options.get("devices", [])
-    if not isinstance(devices, list) or any(
-        not isinstance(host, str) or not host or "," in host or any(character.isspace() for character in host)
-        for host in devices
+    if not isinstance(environment, dict) or any(
+        environment.get(name) is not None and not isinstance(environment[name], str) for name in OVERRIDE_NAMES
     ):
+        message = "Compose did not return the expected settings environment configuration."
         raise ValueError(message)
-    return devices
+    return 0, {name: environment.get(name) or "" for name in OVERRIDE_NAMES}
 
 
-def _validate_configuration(compose: list[str], directory: Path) -> int:
-    """Check effective settings without printing resolved credentials.
+def _validate_configuration(compose: list[str], directory: Path, *, environment: dict[str, str]) -> int:
+    """Validate the final Compose model without exposing resolved credentials.
 
     Returns
     -------
     int
-        The configuration command's exit status.
-
-    Raises
-    ------
-    ValueError
-        If the resolved configuration has no explicit device hosts or has an unexpected shape.
+        Compose's configuration validation exit status.
     """
     result = subprocess.run(  # nosec B603 # ruff: ignore[subprocess-without-shell-equals-true]
-        [*compose, "config", "--format", "json"], cwd=directory, check=False, capture_output=True, text=True
+        [*compose, "config", "--quiet"],
+        cwd=directory,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
     )
     if result.returncode:
         sys.stderr.write(
             f"Compose configuration failed (exit status {result.returncode}). "
-            "Check compose.yaml and .env, including GRAFANA_ADMIN_PASSWORD.\n"
+            "Check compose.yaml, override files and .env, including GRAFANA_ADMIN_PASSWORD.\n"
         )
-        return result.returncode
-    try:
-        model = json.loads(result.stdout)
-        override = model["services"]["exporter"].get("environment", {}).get("TAPO_PLUG_DEVICES")
-    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
-        message = "Compose did not return the expected exporter environment configuration."
-        raise ValueError(message) from error
-    if override is not None and not isinstance(override, str):
-        message = "Compose did not return the expected exporter environment configuration."
-        raise ValueError(message)
-    yaml_devices = _yaml_devices(directory)
-    devices = override.replace(",", " ").split() if override else yaml_devices
-    if not devices:
-        message = (
-            "Configure at least one explicit device IP or hostname in config/exporter.yaml "
-            "under exporters.tapo.devices, or set TAPO_PLUG_DEVICES. Clear an empty whitespace/comma-only override."
-        )
-        raise ValueError(message)
-    if override:
-        sys.stdout.write("Using TAPO_PLUG_DEVICES; it overrides the YAML device list.\n")
-    return 0
+    return result.returncode
 
 
-def _check_prometheus(compose: list[str], directory: Path) -> int:
+def _check_prometheus(compose: list[str], directory: Path, *, environment: dict[str, str]) -> int:
     """Validate Prometheus and alert fixtures without starting exporter dependencies.
 
     Returns
@@ -195,7 +200,7 @@ def _check_prometheus(compose: list[str], directory: Path) -> int:
         "--rm",
         "--no-deps",
         "--volume",
-        f"{directory / 'prometheus'}:/etc/prometheus:ro",
+        f"{directory / 'prometheus/tests'}:/etc/prometheus/tests:ro",
         "--entrypoint",
         "promtool",
         "prometheus",
@@ -204,14 +209,59 @@ def _check_prometheus(compose: list[str], directory: Path) -> int:
         ["check", "config", "/etc/prometheus/prometheus.yml"],
         ["test", "rules", "/etc/prometheus/tests/alerts.test.yml"],
     ):
-        status = _run([*promtool, *operation], directory)
+        status = _run([*promtool, *operation], directory, environment=environment)
         if status:
             return status
     return 0
 
 
+def _compose_files(paths: list[Path], directory: Path) -> list[str]:
+    """Select the base model followed by explicitly ordered overrides.
+
+    Returns
+    -------
+    list[str]
+        Compose file arguments.
+
+    Raises
+    ------
+    FileNotFoundError
+        If an additional Compose file does not exist.
+    """
+    files = ["-f", "compose.yaml"]
+    for override in paths:
+        path = (directory / override).resolve()
+        if not path.is_file():
+            message = f"Compose override file does not exist: {path}"
+            raise FileNotFoundError(message)
+        files.extend(["-f", str(path)])
+    return files
+
+
+def _lifecycle_arguments(arguments: argparse.Namespace) -> list[str]:
+    """Translate a parsed lifecycle command into a fixed Docker argument list.
+
+    Returns
+    -------
+    list[str]
+        Lifecycle operation and explicit options.
+    """
+    if arguments.command == "logs":
+        extra = ["logs", "--tail", "100"]
+        if arguments.follow:
+            extra.append("--follow")
+        return [*extra, *arguments.services]
+    return {
+        "up": ["up", "-d", "--wait", "--wait-timeout", "120"],
+        "down": ["down"],
+        "reset": ["down", "--volumes", "--remove-orphans"],
+        "status": ["ps"],
+        "pull": ["pull"],
+    }[arguments.command]
+
+
 def _compose(arguments: argparse.Namespace, directory: Path) -> int:
-    """Run the selected lifecycle command against this checkout's stack.
+    """Resolve settings and run a lifecycle command against this checkout.
 
     Returns
     -------
@@ -221,7 +271,7 @@ def _compose(arguments: argparse.Namespace, directory: Path) -> int:
     Raises
     ------
     FileNotFoundError
-        If Docker is unavailable or the local environment file has not been created.
+        If Docker, an override file, or required local credentials file is unavailable.
     """
     docker = shutil.which("docker")
     if docker is None:
@@ -231,7 +281,7 @@ def _compose(arguments: argparse.Namespace, directory: Path) -> int:
     creates_containers = command in {"check", "up"}
     env_file = directory / ".env"
     if creates_containers and not env_file.is_file():
-        message = "Missing .env; run 'uv run power-monitor init' and configure your devices first."
+        message = "Missing .env; run 'uv run power-monitor init' and configure credentials first."
         raise FileNotFoundError(message)
     compose = [
         docker,
@@ -240,35 +290,36 @@ def _compose(arguments: argparse.Namespace, directory: Path) -> int:
         str(directory),
         "--env-file",
         str(env_file) if env_file.is_file() else os.devnull,
-        "-f",
-        "compose.yaml",
     ]
-    environment = None
+    files = _compose_files(arguments.compose_file, directory)
     if creates_containers:
-        status = _validate_configuration(compose, directory)
+        status, overrides = _resolve_overrides(compose, directory)
         if status:
             return status
+        configuration = load_configuration(directory, overrides)
+        runtime = render_configuration(directory, configuration)
+        environment = os.environ | compose_environment(configuration, runtime)
+        active = [name for name, value in overrides.items() if value]
+        if active:
+            sys.stdout.write(f"Environment overrides: {', '.join(active)}.\n")
     else:
-        # These commands cannot start containers. Override required values only in the
-        # subprocess, retaining the environment file and COMPOSE_PROJECT_NAME resolution.
-        placeholder = "unused-for-management"
-        environment = os.environ | {"TAPO_PLUG_DEVICES": "127.0.0.1", "GRAFANA_ADMIN_PASSWORD": placeholder}
+        # Recovery commands need only project identity, even if YAML or local credentials are missing.
+        # These placeholders stay in the child environment and cannot create containers.
+        environment = os.environ | {
+            "TAPO_PLUG_DEVICES": "127.0.0.1",
+            "GRAFANA_ADMIN_PASSWORD": secrets.token_urlsafe(32),
+            "GRAFANA_BIND_ADDRESS": "127.0.0.1",
+            "GRAFANA_PORT": "3000",
+            "PYPROM_RUNTIME_DIR": str(directory / ".runtime" / "unconfigured"),
+        }
+    compose.extend(files)
+    if creates_containers:
+        status = _validate_configuration(compose, directory, environment=environment)
+        if status:
+            return status
     if command == "check":
-        return _check_prometheus(compose, directory)
-    if command == "logs":
-        extra = ["logs", "--tail", "100"]
-        if arguments.follow:
-            extra.append("--follow")
-        extra.extend(arguments.services)
-    else:
-        extra = {
-            "up": ["up", "-d", "--wait", "--wait-timeout", "120"],
-            "down": ["down"],
-            "reset": ["down", "--volumes", "--remove-orphans"],
-            "status": ["ps"],
-            "pull": ["pull"],
-        }[command]
-    return _run([*compose, *extra], directory, environment=environment)
+        return _check_prometheus(compose, directory, environment=environment)
+    return _run([*compose, *_lifecycle_arguments(arguments)], directory, environment=environment)
 
 
 def main(argv: list[str] | None = None) -> int:

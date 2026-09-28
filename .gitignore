@@ -21,3 +21,4 @@ data/
 secrets/
 config.local.yaml
 compose.override.yaml
+.runtime/

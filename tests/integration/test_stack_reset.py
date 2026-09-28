@@ -72,8 +72,9 @@ def test_reset_removes_only_selected_project_data(stack: Stack, tmp_path: Path, 
     mapping(model["services"]).pop("metrics")
     compose_file = checkout / "compose.yaml"
     compose_file.write_text(json.dumps(model))
-    config_file = checkout / "config.yaml"
-    config_file.write_bytes(stack.exporter_config.read_bytes())
+    (checkout / "config").mkdir()
+    config_file = checkout / "config/stack.yaml"
+    config_file.write_bytes((stack.directory / "config/stack.yaml").read_bytes())
     env_file = checkout / ".env"
     if environment_exists:
         env_file.write_text(f"COMPOSE_PROJECT_NAME={stack.project}\n# Existing settings must survive reset.\n")

@@ -7,9 +7,10 @@ The Python package supplies the `power-monitor` checkout utility; it does not im
 Device collection belongs to the separate `pyprom-exporters` project.
 
 - `compose.yaml`: pinned images, service configuration, health checks and persistent storage.
-- `config/exporter.yaml`: device hosts, live probing, timeouts and concurrency; credentials stay in `.env`.
-- `prometheus/`: scrape configuration and alert rules.
-- `grafana/provisioning/`: datasource and dashboard providers.
+- `config/stack.yaml`: all noncredential user settings, with native exporter options nested under `exporter`.
+- `prometheus/`: native configuration templates, alert rules and fixtures.
+- `grafana/provisioning/`: native datasource and dashboard provisioning templates.
+- `.runtime/`: ignored generated native configurations addressed by their content digest.
 - `dash.json`: portable standalone dashboard with built-in Grafana panels.
 - `src/grafana_tp_link/`: CLI initialization and Compose lifecycle commands.
 - `tests/`: unit/contract tests and an opt-in isolated Docker integration suite.
@@ -26,12 +27,23 @@ and generated reports in ignored `report/`.
 Do not print or commit credentials. Explicit device hosts avoid dependence on broadcast discovery through Docker.
 Keep `.env.example` free of usable credentials.
 
-The recommended inventory is the tracked `config/exporter.yaml` list at `exporters.tapo.devices`,
-with one IP address or hostname per entry and optional inline comments. A nonempty `TAPO_PLUG_DEVICES` replaces
-that entire list; an unset or empty value uses YAML. Whitespace/comma-only overrides are invalid.
-`check` and `up` must validate the effective YAML/environment configuration and require at least one explicit host.
-Preserve the read-only YAML mount and `--no-write-config` so comments survive. YAML-only edits require exporter restart;
-environment changes require Compose `up` to recreate the container with its changed settings.
+The single user-facing configuration file is `config/stack.yaml`. Device inventory lives at
+`exporter.exporters.tapo.devices`, with one IP address or hostname per entry and optional inline comments.
+Grafana service settings and Prometheus retention/scrape settings live in the `grafana` and `prometheus` sections.
+Keep only credentials active in `.env.example`; optional noncredential overrides must be commented out.
+Compose resolves shell variables ahead of `.env`; nonempty resolved overrides replace YAML, while empty values use YAML.
+A device override replaces the complete list; whitespace/comma-only overrides are invalid.
+
+`check` and `up` validate the effective configuration and require at least one explicit host. Render credential-free native
+service files into ignored `.runtime/<digest>/`, keeping exporter targets and datasource intervals synchronized.
+Never rewrite source YAML: preserve user comments and formatting. Mount generated configuration read-only and retain
+`--no-write-config`. A configuration digest change must produce changed mount paths, so `up` applies YAML changes by
+recreating affected containers while preserving persistent data; do not require manual restarts.
+
+The utility always loads base `compose.yaml` first; repeatable global `--compose-file` options add files in the supplied
+order, resolving relative paths against the checkout. Honor those options for every lifecycle command, including reset.
+Recovery commands (`down`, `reset`, `status`, `logs`, `pull`) must work without `.env` or valid user YAML and must retain
+project identity where available through `.env` or the shell's `COMPOSE_PROJECT_NAME`.
 
 `down` and the wrapper's `-r` must preserve persistent volumes. The explicit `reset --yes` command is the exception:
 it removes the selected Compose project's containers, non-external networks and managed data volumes.
@@ -40,7 +52,7 @@ and must not restart services automatically. `make reset` intentionally supplies
 Do not execute reset against an existing deployment as part of validation; use isolated integration resources.
 Do not reintroduce blanket prune commands or deletion of host data directories.
 Database migration is a separately documented operation on backed-up copies; do not perform it during development.
-Keep the exporter wait below the Prometheus timeout, and that timeout below the scrape interval.
+Keep the exporter wait below the Prometheus timeout, and that timeout at or below the scrape interval.
 
 Dashboard metrics use `host` and `alias`, with Prometheus adding `job` and `instance`.
 Energy is in Wh; daily/monthly gauges reset and must not be treated as counters.

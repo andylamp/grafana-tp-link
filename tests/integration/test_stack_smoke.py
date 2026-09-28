@@ -142,7 +142,7 @@ def test_stack_provisions_queries_and_preserves_data_across_recreation(stack: St
         "exporter",
         "python",
         "-c",
-        "import urllib.request as r; print(r.urlopen('http://127.0.0.1:8090/metrics', timeout=5).read().decode())",
+        f"import urllib.request as r; print(r.urlopen('http://127.0.0.1:{stack.exporter_port}/metrics',timeout=5).read().decode())",
     )
     assert "tapo_discovered_devices 0.0" in metrics
     assert stack.exporter_config.read_bytes() == config_before

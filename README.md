@@ -42,24 +42,24 @@ uv run --locked power-monitor init
 `init` creates a Git-ignored `.env` with private permissions and a randomly generated Grafana admin password.
 It prints no password and preserves an existing `.env`.
 
-Edit the existing `exporters.tapo.devices` list in [config/exporter.yaml](config/exporter.yaml),
+Edit the existing `exporter.exporters.tapo.devices` list in [config/stack.yaml](config/stack.yaml),
 keeping the file's other settings. Add one plug IP address or resolvable hostname per entry, with comments as needed:
 
 ```yaml
-exporters:
-  tapo:
-    devices:
-      - "192.0.2.10" # Desk plug; replace this example address.
-      - "kitchen-plug.example" # Kitchen plug; replace this example hostname.
+exporter:
+  exporters:
+    tapo:
+      devices:
+        - "192.0.2.10" # Desk plug; replace this example address.
+        - "kitchen-plug.example" # Kitchen plug; replace this example hostname.
 ```
 
 Use your own reachable addresses and reserve their DHCP addresses where possible.
 Docker bridge networking does not provide reliable LAN broadcast discovery.
 The comments describe your inventory; dashboard aliases still come from the plugs themselves.
 
-Edit `.env` for credentials and local service settings:
+Edit `.env` for credentials:
 
-- Leave `TAPO_PLUG_DEVICES` empty or unset to use the YAML list.
 - Set `TP_LINK_USERNAME` and `TP_LINK_PASSWORD` when your devices require Tapo account authentication.
   Older Kasa/HS110 devices may work with both empty.
 - Keep or change the generated `GRAFANA_ADMIN_PASSWORD`. Read it locally from `.env` when signing in.
@@ -72,13 +72,14 @@ uv run --locked power-monitor check
 uv run --locked power-monitor up
 ```
 
-Open Grafana at `http://127.0.0.1:<GRAFANA_PORT>/`, using the port configured in `.env`,
-and sign in as `admin`, or your configured `GRAFANA_ADMIN_USER`.
+Open Grafana using `grafana.bind_address` and `grafana.port` from `config/stack.yaml`
+(normally `http://127.0.0.1:3000/`), and sign in as `admin`, or your configured `GRAFANA_ADMIN_USER`.
 The **TP-Link · Power & Energy** dashboard is provisioned automatically and selected as the home dashboard.
 No API registration script, manual datasource creation or dashboard upload is required.
 
-`check` validates Compose and runs the pinned Prometheus image's `promtool` against the configuration and alert rules.
-It also runs the alert-rule fixtures. It does not start the exporter or probe plugs.
+`check` validates the effective YAML and environment settings, generates native service configuration, and runs
+the pinned Prometheus image's `promtool` against the configuration and alert-rule fixtures.
+It does not start the exporter or probe plugs.
 `up` waits for container health checks; those checks establish service readiness,
 not that every configured plug has produced a reading.
 
@@ -108,10 +109,20 @@ Use `power-monitor init` first. The wrapper's old destructive removal behavior h
 deleting monitoring data now requires the explicit reset command below.
 
 The Compose project is `tp-link-monitoring`, distinct from the legacy `grafana-tp-link` project.
-`status`, `logs`, `down`, `reset --yes` and `pull` also work without `.env`. If you originally set a custom
+`status`, `logs`, `down`, `reset --yes` and `pull` also work without `.env` or a valid `config/stack.yaml`.
+If you originally set a custom
 `COMPOSE_PROJECT_NAME`, retain that name in `.env` or export it in your shell to address the same stack.
 `check` and `up` read the YAML and effective environment and require at least one explicit device host
 before creating containers.
+For a deployment with additional Compose files, pass each one before the command, in the same order every time:
+
+```sh
+uv run --locked power-monitor --compose-file compose.override.yaml up
+uv run --locked power-monitor --compose-file compose.override.yaml down
+```
+
+Paths are relative to the checkout; repeat `--compose-file` for additional files. The utility always loads the base
+`compose.yaml` first. Retain these options for `check`, `status`, `logs`, `reset` and other lifecycle commands too.
 
 Pulling downloads the versions recorded in `compose.yaml`; it does not select newer releases automatically.
 Review version and digest changes together, consult upstream upgrade notes, back up data, then run `pull` and `up`.
@@ -148,25 +159,56 @@ For an ordinary stop that retains monitoring data, use `down` or the wrapper's `
 
 ## Configuration
 
-Device inventory and exporter behavior live in the tracked [config/exporter.yaml](config/exporter.yaml).
-Credentials and local service settings live in `.env`; [.env.example](.env.example) describes those settings.
-The exporter mounts YAML read-only and uses `--no-write-config`, so your formatting and inline comments remain intact.
-Docker administrators can still inspect container environment variables; keep `.env` private.
+[config/stack.yaml](config/stack.yaml) is the single user-facing file for device inventory, exporter behavior,
+Grafana's address/port, Prometheus retention, and scrape/evaluation intervals. Credentials stay in the private `.env`.
+Edit the existing YAML values and keep comments next to settings or individual device hosts.
 
-| Setting | Default | Meaning |
+| YAML setting | Default | Meaning |
 | --- | --- | --- |
-| `TAPO_PLUG_DEVICES` | Empty | Optional replacement for the YAML device list; separate hosts with spaces or commas |
+| `grafana.bind_address` | `127.0.0.1` | Host address serving Grafana |
+| `grafana.port` | `3000` | Host port serving Grafana |
+| `prometheus.retention_time` | `3y` | Maximum stored history by age |
+| `prometheus.retention_size` | `10GB` | Maximum stored blocks by size |
+| `prometheus.scrape_interval` | `30s` | Time between exporter scrapes |
+| `prometheus.scrape_timeout` | `25s` | Maximum wait for one exporter scrape |
+| `prometheus.evaluation_interval` | `30s` | Time between alert evaluations |
+| `exporter.prometheus_port` | `8090` | Exporter's internal metrics port |
+| `exporter.log_level` | `INFO` | Exporter logging level |
+| `exporter.exporters.tapo.devices` | Empty list | One explicit plug IP or hostname per entry |
+
+The `exporter` section contains the exporter's native configuration, including device concurrency, discovery options,
+live-refresh settings and metric definitions. It is nested under `exporter` so the service settings remain in one file.
+The utility validates shared settings and common device options.
+The exporter validates advanced native options at startup.
+Do not put account credentials in YAML.
+
+| `.env` credential | Default | Meaning |
+| --- | --- | --- |
 | `TP_LINK_USERNAME`, `TP_LINK_PASSWORD` | Empty | Device account credentials when required |
-| `PYPROM_EXPORTERS_LOG_LEVEL` | `INFO` | Exporter logging level |
 | `GRAFANA_ADMIN_USER` | `admin` | Initial Grafana administrator name |
 | `GRAFANA_ADMIN_PASSWORD` | Generated by `init` | Initial password for a new Grafana database |
-| `GRAFANA_BIND_ADDRESS` | `127.0.0.1` | Host address serving Grafana |
-| `GRAFANA_PORT` | `.env` value; Compose fallback `3000` | Host port serving Grafana |
-| `PROMETHEUS_RETENTION_TIME` | `3y` | Maximum stored history by age |
-| `PROMETHEUS_RETENTION_SIZE` | `10GB` | Maximum stored blocks by size |
 
 Changing Grafana's initial admin settings does not reset accounts in an existing database.
 Use Grafana's account-management or password-reset facilities for an existing installation.
+Docker administrators can inspect container environment variables; keep `.env` private.
+
+`check` and `up` generate read-only native service files under ignored `.runtime/<digest>/`.
+The utility does not rewrite `config/stack.yaml`, so inline comments and formatting survive.
+Generated files contain no account credentials and should not be edited or committed.
+The tracked Prometheus and Grafana provisioning files are implementation templates; ordinary configuration changes
+belong in `config/stack.yaml`. The renderer keeps the exporter target and Grafana datasource interval aligned.
+
+After changing YAML or credentials, use:
+
+```sh
+uv run --locked power-monitor check
+uv run --locked power-monitor up
+```
+
+Changes to generated service files produce different mount paths; port and retention changes update the Compose model.
+`up` recreates affected service containers while retaining their data volumes. No manual restart is needed.
+Use these utility commands to prepare configuration before starting services; a raw `docker compose up` skips that
+preparation. Include your `--compose-file` options when using local overrides.
 
 Grafana binds to the local host by default. For remote access, configure a suitable bind address and your network's
 access controls, or place it behind an authenticated TLS reverse proxy. Prometheus and the exporter are available only
@@ -174,58 +216,45 @@ on the Compose network; their ports are not published to the host.
 
 Prometheus removes older blocks when either retention limit is reached. The size setting does not cap all disk use:
 allow additional space for the write-ahead log, active samples and compaction. Volumes persist across `down` and `up`.
-Do not use `docker compose down --volumes` when you want to retain the data.
+Use the explicit reset command only when you intend to discard that data.
 
-### Device inventory and environment overrides
+### Optional environment overrides
 
-Use `exporters.tapo.devices` in `config/exporter.yaml` for the normal device list.
-Each YAML item is one IP address or hostname; place descriptions after `#`, not inside the address value.
-Keep credentials in `.env` rather than adding them to the tracked YAML file.
+[.env.example](.env.example) keeps noncredential overrides commented out. YAML is sufficient for normal operation.
+Compose resolves shell values ahead of `.env`; a nonempty resolved override replaces its corresponding YAML value.
+An empty or unset override uses YAML. Remove or unset an old override when you want YAML edits to take effect.
 
-A nonempty `TAPO_PLUG_DEVICES` replaces the entire YAML device list, using the exporter's native environment override.
-An unset or empty value uses YAML. A value containing only whitespace or commas is invalid; it does not fall back to YAML.
+| Environment override | YAML setting |
+| --- | --- |
+| `TAPO_PLUG_DEVICES` | `exporter.exporters.tapo.devices` |
+| `PYPROM_EXPORTERS_LOG_LEVEL` | `exporter.log_level` |
+| `GRAFANA_BIND_ADDRESS`, `GRAFANA_PORT` | `grafana.bind_address`, `grafana.port` |
+| `PROMETHEUS_RETENTION_TIME`, `PROMETHEUS_RETENTION_SIZE` | `prometheus.retention_time`, `prometheus.retention_size` |
+| `PROMETHEUS_PORT` | `exporter.prometheus_port` |
+| `PROMETHEUS_SCRAPE_INTERVAL` | `prometheus.scrape_interval` |
+| `PROMETHEUS_SCRAPE_TIMEOUT` | `prometheus.scrape_timeout` |
+| `PROMETHEUS_EVALUATION_INTERVAL` | `prometheus.evaluation_interval` |
+
+A nonempty `TAPO_PLUG_DEVICES` replaces the entire YAML device list, with hosts separated by spaces or commas.
+Whitespace/comma-only lists are invalid. Each YAML list item is one IP address or hostname; descriptions belong after `#`.
 The effective configuration must contain at least one explicit host because broadcast discovery is disabled.
-
-To switch an existing environment list to YAML, clear or remove `TAPO_PLUG_DEVICES` in `.env` and remove any exported
-shell override with `unset TAPO_PLUG_DEVICES`. Then run `power-monitor check` and `power-monitor up` so Compose recreates
-an exporter whose container environment changed. Restarting alone does not update an existing container's environment.
-If you added a local Compose override, use the explicit multi-file commands in the
-[migration guide](docs/migration.md#preserve-prometheus-history-on-a-copy) instead.
-
-For subsequent YAML-only edits, validate and restart the exporter:
-
-```sh
-uv run --locked power-monitor check
-docker compose --env-file .env -f compose.yaml restart exporter
-```
-
-Compose `up` does not detect changed contents of bind-mounted files. The restart loads the edited YAML without rewriting
-its comments or formatting. If you use a local Compose override, include that file in the restart command as well.
+For example, clear any old device override in `.env` and run `unset TAPO_PLUG_DEVICES` in your shell before using YAML.
 
 ### Scraping and device concurrency
 
-The checked-in defaults are:
+The defaults scrape the exporter every 30 seconds with a 25-second Prometheus timeout.
+Under `exporter.exporters.tapo`:
 
-- Prometheus scrapes `exporter:8090/metrics` every 30 seconds, with a 25-second timeout.
-- The exporter probes on scrape (`refresh_interval: null`) and waits up to 20 seconds for the refresh.
-- Up to 10 device operations run concurrently. Individual device requests time out after 5 seconds.
-- Overlapping exporter scrapes share an in-flight refresh. If its wait expires, the exporter can return an older snapshot.
+- `prometheus_options.refresh_interval: null` probes on scrape.
+- `prometheus_options.scrape_timeout: 20.0` caps how long a scrape waits for the refresh.
+- `max_concurrent_devices: 10` bounds concurrent device operations.
+- `discovery_options.timeout: 5` sets the individual device request timeout in seconds.
 
-Edit [config/exporter.yaml](config/exporter.yaml) for device hosts, concurrency and exporter timeouts.
-Edit [prometheus/prometheus.yml](prometheus/prometheus.yml) for scraping and evaluation intervals.
-Keep the exporter wait below Prometheus's scrape timeout and the scrape timeout below the scrape interval.
-Keep Grafana's datasource interval in
-[grafana/provisioning/datasources](grafana/provisioning/datasources) aligned with the scrape interval.
-
-A positive `refresh_interval` enables background polling instead of live probing. Increase concurrency or polling
-intervals based on observed device latency and LAN capacity; larger fleets and unreachable plugs can lengthen refreshes.
-Run `power-monitor check` after changes and restart affected services to load updated configuration.
-Compose `up` does not detect changed contents of bind-mounted configuration files. For example:
-
-```sh
-uv run --locked power-monitor check
-docker compose --env-file .env -f compose.yaml restart exporter prometheus grafana
-```
+Keep the exporter wait below Prometheus's scrape timeout, and the scrape timeout at or below the scrape interval.
+A positive `refresh_interval` enables background polling instead of live probing. Adjust concurrency or polling intervals
+based on observed device latency and LAN capacity; larger fleets and unreachable plugs can lengthen refreshes.
+Overlapping scrapes share an in-flight refresh. If its wait expires, the exporter can return an older snapshot.
+Validate and apply any changes using `power-monitor check` and `power-monitor up`.
 
 ## Reading and reusing the dashboard
 
@@ -310,9 +339,10 @@ Keep audit notes in ignored `scratch/` and generated reports in ignored `report/
 ## Repository layout
 
 - `compose.yaml`: pinned Compose services, volumes and health checks.
-- `config/exporter.yaml`: device hosts and exporter behavior; credentials stay in `.env`.
-- `prometheus/`: scrape configuration and alert rules.
-- `grafana/provisioning/`: datasource and dashboard provisioning.
+- `config/stack.yaml`: all noncredential user settings, including device inventory.
+- `prometheus/`: native configuration templates, alert rules and rule fixtures.
+- `grafana/provisioning/`: native datasource and dashboard provisioning templates.
+- `.runtime/`: ignored generated native service configuration; do not edit it.
 - `dash.json`: portable Grafana dashboard.
 - `src/grafana_tp_link/`: the `power-monitor` utility.
 - `tests/`: configuration, dashboard, utility and isolated integration tests.

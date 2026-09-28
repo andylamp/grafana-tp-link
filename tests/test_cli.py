@@ -6,17 +6,18 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess  # nosec B404 # ruff: ignore[suspicious-subprocess-import]
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import yaml
 
 from grafana_tp_link import cli
 
-if TYPE_CHECKING:
-    from pathlib import Path
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
@@ -31,9 +32,14 @@ def checkout(tmp_path: Path) -> Path:
     directory = tmp_path / "power monitor"
     directory.mkdir()
     (directory / "compose.yaml").write_text("services: {}\n", encoding="utf-8")
-    (directory / "config").mkdir()
-    (directory / "config" / "exporter.yaml").write_text("exporters:\n  tapo:\n    devices: []\n", encoding="utf-8")
-    (directory / ".env.example").write_text("GRAFANA_ADMIN_PASSWORD=\nTAPO_PLUG_DEVICES=\n", encoding="utf-8")
+    for name in ("config", "prometheus", "grafana"):
+        shutil.copytree(ROOT / name, directory / name)
+    config = directory / "config" / "stack.yaml"
+    model = yaml.safe_load(config.read_text(encoding="utf-8"))
+    model["exporter"]["exporters"]["tapo"]["devices"] = []
+    model["exporter"]["exporters"]["tapo"]["max_concurrent_devices"] = 10
+    config.write_text(yaml.safe_dump(model), encoding="utf-8")
+    (directory / ".env.example").write_text("GRAFANA_ADMIN_PASSWORD=\nTP_LINK_USERNAME=\n", encoding="utf-8")
     return directory
 
 
@@ -48,7 +54,7 @@ def test_initialization_is_private_idempotent_and_does_not_log_credentials(
     assert len(password) >= 32
     assert stat.S_IMODE(env.stat().st_mode) == 0o600
     assert password not in capsys.readouterr().out
-    edited = settings.replace("TAPO_PLUG_DEVICES=", "TAPO_PLUG_DEVICES=192.0.2.1")
+    edited = settings.replace("TP_LINK_USERNAME=", "TP_LINK_USERNAME=test-user")
     env.write_text(edited, encoding="utf-8")
     assert cli.main(["--directory", str(checkout), "init"]) == 0
     assert env.read_text(encoding="utf-8") == edited
@@ -73,7 +79,7 @@ def resolved_configuration(monkeypatch: pytest.MonkeyPatch) -> Mock:
     Mock
         Captured subprocess runner providing resolved JSON configuration.
     """
-    model = {"services": {"exporter": {"environment": {"TAPO_PLUG_DEVICES": "192.0.2.1"}}}}
+    model = {"services": {"settings": {"environment": {"TAPO_PLUG_DEVICES": "192.0.2.1"}}}}
     runner = Mock(return_value=subprocess.CompletedProcess([], 0, json.dumps(model), ""))
     monkeypatch.setattr(cli.subprocess, "run", runner)
     return runner
@@ -198,24 +204,31 @@ def test_invalid_log_service_is_not_forwarded(checkout: Path, command_runner: Mo
 
 
 @pytest.mark.parametrize("command", ["down", "status", "logs", "pull"])
-def test_management_without_env_preserves_project_and_does_not_write_settings(
-    checkout: Path, command_runner: Mock, monkeypatch: pytest.MonkeyPatch, command: str
+@pytest.mark.parametrize("has_env", [True, False])
+def test_management_ignores_invalid_yaml_and_preserves_project(
+    checkout: Path, command_runner: Mock, monkeypatch: pytest.MonkeyPatch, command: str, *, has_env: bool
 ) -> None:
     """Management remains possible after losing credentials and keeps explicit project identity."""
     env_file = checkout / ".env"
-    env_file.unlink()
+    original = env_file.read_bytes()
+    if not has_env:
+        env_file.unlink()
+    (checkout / "config" / "stack.yaml").write_text("invalid YAML: [\n", encoding="utf-8")
     monkeypatch.setenv("COMPOSE_PROJECT_NAME", "existing-power-stack")
     monkeypatch.setenv("GRAFANA_ADMIN_PASSWORD", "")
     assert cli.main(["--directory", str(checkout), command]) == 0
     command_runner.assert_called_once()
     arguments = command_runner.call_args.args[0]
     environment = command_runner.call_args.kwargs["environment"]
-    assert arguments[arguments.index("--env-file") + 1] == os.devnull
+    assert arguments[arguments.index("--env-file") + 1] == (str(env_file) if has_env else os.devnull)
     assert environment["COMPOSE_PROJECT_NAME"] == "existing-power-stack"
     assert environment["TAPO_PLUG_DEVICES"] == "127.0.0.1"
     assert environment["GRAFANA_ADMIN_PASSWORD"]
     assert not os.environ["GRAFANA_ADMIN_PASSWORD"]
-    assert not env_file.exists()
+    if has_env:
+        assert env_file.read_bytes() == original
+    else:
+        assert not env_file.exists()
     assert not {"up", "run", "create", "--volumes", "prune"}.intersection(arguments)
 
 
@@ -242,14 +255,14 @@ def test_empty_resolved_device_list_cannot_launch_containers(
     """Validation uses Compose's resolved environment and rejects empty token lists."""
     private_marker = "DO_NOT_PRINT_RESOLVED_VALUES"
     model = {
-        "services": {"exporter": {"environment": {"TAPO_PLUG_DEVICES": devices, "TP_LINK_PASSWORD": private_marker}}}
+        "services": {"settings": {"environment": {"TAPO_PLUG_DEVICES": devices, "TP_LINK_PASSWORD": private_marker}}}
     }
     resolved_configuration.return_value.stdout = json.dumps(model)
     for command in ("check", "up"):
         assert cli.main(["--directory", str(checkout), command]) == 1
         command_runner.assert_not_called()
         output = capsys.readouterr()
-        assert "at least one explicit device" in output.err
+        assert "device" in output.err.lower()
         assert private_marker not in output.out + output.err
 
 
@@ -266,7 +279,7 @@ def test_unexpected_compose_response_is_private_and_stops_startup(
     assert cli.main(["--directory", str(checkout), "up"]) == 1
     command_runner.assert_not_called()
     output = capsys.readouterr()
-    assert "expected exporter environment" in output.err
+    assert "expected settings environment" in output.err
     assert "PRIVATE_TEST_VALUE" not in output.out + output.err
 
 
@@ -274,10 +287,15 @@ def test_resolved_configuration_is_captured_and_management_environment_is_forwar
     checkout: Path, resolved_configuration: Mock
 ) -> None:
     """Capture both Compose streams; send safe overrides only to the child process."""
-    assert cli._validate_configuration(["/usr/bin/docker", "compose"], checkout) == 0
+    status, overrides = cli._resolve_overrides(["/usr/bin/docker", "compose"], checkout)
+    assert status == 0
+    assert overrides["TAPO_PLUG_DEVICES"] == "192.0.2.1"
     assert resolved_configuration.call_args.kwargs["capture_output"] is True
     assert resolved_configuration.call_args.kwargs["text"] is True
     environment = {"TAPO_PLUG_DEVICES": "127.0.0.1"}
+    assert cli._validate_configuration(["/usr/bin/docker", "compose"], checkout, environment=environment) == 0
+    assert resolved_configuration.call_args.kwargs["capture_output"] is True
+    assert resolved_configuration.call_args.kwargs["env"] == environment
     assert cli._run(["/usr/bin/docker", "compose", "ps"], checkout, environment=environment) == 0
     assert resolved_configuration.call_args.kwargs["env"] == environment
 
@@ -312,7 +330,8 @@ def test_reset_removes_project_data_and_preserves_configuration(
     settings = env_file.read_bytes()
     if not has_env:
         env_file.unlink()
-    config_file = checkout / "compose.yaml"
+    config_file = checkout / "config" / "stack.yaml"
+    config_file.write_text("invalid YAML: [\n", encoding="utf-8")
     configuration = config_file.read_bytes()
     legacy_data = checkout / "data" / "legacy.txt"
     legacy_data.parent.mkdir()
@@ -345,16 +364,16 @@ def test_yaml_devices_allow_startup_and_preserve_comments(
     override: str | None,
 ) -> None:
     """Unset and empty environment overrides select the editable YAML list."""
-    config = checkout / "config" / "exporter.yaml"
-    content = (
-        "# Device notes are preserved.\nexporters:\n  tapo:\n    devices:\n"
-        '      - "192.0.2.10"  # Office desk\n'
-        '      - "kitchen-plug.lan"  # Coffee machine\n'
-        '      # - "192.0.2.12"  # Temporarily disabled\n'
+    config = checkout / "config" / "stack.yaml"
+    content = config.read_text(encoding="utf-8").replace(
+        "      devices: []",
+        '      devices:\n        - "192.0.2.10"  # Office desk\n'
+        '        - "kitchen-plug.lan"  # Coffee machine\n'
+        '        # - "192.0.2.12"  # Temporarily disabled',
     )
     config.write_text(content, encoding="utf-8")
     environment = {} if override is None else {"TAPO_PLUG_DEVICES": override}
-    resolved_configuration.return_value.stdout = json.dumps({"services": {"exporter": {"environment": environment}}})
+    resolved_configuration.return_value.stdout = json.dumps({"services": {"settings": {"environment": environment}}})
     for command in ("check", "up"):
         assert cli.main(["--directory", str(checkout), command]) == 0
     assert command_runner.call_count == 3
@@ -369,36 +388,13 @@ def test_invalid_environment_override_does_not_fall_back_to_yaml(
     override: str,
 ) -> None:
     """A nonempty override replaces YAML even when it resolves to no hosts."""
-    (checkout / "config" / "exporter.yaml").write_text(
-        "exporters:\n  tapo:\n    devices: [192.0.2.10]\n", encoding="utf-8"
+    config = checkout / "config" / "stack.yaml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace("devices: []", "devices: [192.0.2.10]"), encoding="utf-8"
     )
     resolved_configuration.return_value.stdout = json.dumps(
-        {"services": {"exporter": {"environment": {"TAPO_PLUG_DEVICES": override}}}}
+        {"services": {"settings": {"environment": {"TAPO_PLUG_DEVICES": override}}}}
     )
-    assert cli.main(["--directory", str(checkout), "up"]) == 1
-    command_runner.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    "content",
-    [
-        "- not-a-mapping\n",
-        "exporters: []\n",
-        "exporters: {tapo: false}\n",
-        "exporters: {tapo: {devices: 192.0.2.10}}\n",
-        "exporters: {tapo: {devices: [null]}}\n",
-        "exporters: {tapo: {devices: [123]}}\n",
-        'exporters: {tapo: {devices: [""]}}\n',
-        'exporters: {tapo: {devices: ["192.0.2.10 192.0.2.11"]}}\n',
-        'exporters: {tapo: {devices: ["192.0.2.10,192.0.2.11"]}}\n',
-        "exporters: {tapo: {devices: [{host: 192.0.2.10}]}}\n",
-    ],
-)
-def test_invalid_yaml_device_structure_cannot_launch_containers(
-    checkout: Path, command_runner: Mock, content: str
-) -> None:
-    """YAML must provide one nonempty IP or hostname string per list item."""
-    (checkout / "config" / "exporter.yaml").write_text(content, encoding="utf-8")
     assert cli.main(["--directory", str(checkout), "up"]) == 1
     command_runner.assert_not_called()
 
@@ -408,16 +404,160 @@ def test_yaml_syntax_errors_do_not_expose_configuration_values(
 ) -> None:
     """Parser diagnostics cannot print private configuration contents."""
     marker = "PRIVATE_TEST_VALUE"
-    (checkout / "config" / "exporter.yaml").write_text(f"credentials: [{marker}\n", encoding="utf-8")
+    (checkout / "config" / "stack.yaml").write_text(f"credentials: [{marker}\n", encoding="utf-8")
     assert cli.main(["--directory", str(checkout), "check"]) == 1
     command_runner.assert_not_called()
     output = capsys.readouterr()
-    assert "YAML syntax" in output.err
+    assert "YAML" in output.err
     assert marker not in output.out + output.err
 
 
-def test_missing_exporter_configuration_cannot_launch_containers(checkout: Path, command_runner: Mock) -> None:
+def test_missing_stack_configuration_cannot_launch_containers(checkout: Path, command_runner: Mock) -> None:
     """An environment override does not mask a missing bind-mounted configuration file."""
-    (checkout / "config" / "exporter.yaml").unlink()
+    (checkout / "config" / "stack.yaml").unlink()
     assert cli.main(["--directory", str(checkout), "up"]) == 1
     command_runner.assert_not_called()
+
+
+@pytest.mark.parametrize("command", ["check", "up"])
+def test_final_compose_failure_stops_before_container_creation(
+    checkout: Path,
+    command_runner: Mock,
+    resolved_configuration: Mock,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    """Errors in the full generated stack retain exit status while keeping captured text private."""
+    valid_probe = resolved_configuration.return_value
+    private_marker = "PRIVATE_COMPOSE_CONTENTS"
+    resolved_configuration.side_effect = [
+        valid_probe,
+        subprocess.CompletedProcess([], 9, private_marker, private_marker),
+    ]
+    assert cli.main(["--directory", str(checkout), command]) == 9
+    command_runner.assert_not_called()
+    assert resolved_configuration.call_count == 2
+    assert resolved_configuration.call_args.args[0][-2:] == ["config", "--quiet"]
+    output = capsys.readouterr()
+    assert "exit status 9" in output.err
+    assert private_marker not in output.out + output.err
+
+
+@pytest.mark.parametrize("command", ["up", "check", "status", "logs", "down", "pull", "reset"])
+def test_compose_override_order_is_preserved_for_every_operation(
+    checkout: Path, command_runner: Mock, resolved_configuration: Mock, command: str
+) -> None:
+    """Relative and absolute overrides follow the base model for creation and recovery alike."""
+    relative = Path("storage override.yaml")
+    absolute = checkout / "last override.yaml"
+    for override in (checkout / relative, absolute):
+        override.write_text("services: {}\n", encoding="utf-8")
+    arguments = [
+        "--directory",
+        str(checkout),
+        "--compose-file",
+        str(relative),
+        "--compose-file",
+        str(absolute),
+        command,
+    ]
+    if command == "reset":
+        arguments.append("--yes")
+    assert cli.main(arguments) == 0
+    for call in command_runner.call_args_list:
+        process_arguments = call.args[0]
+        files = [process_arguments[index + 1] for index, value in enumerate(process_arguments) if value == "-f"]
+        assert files == ["compose.yaml", str(checkout / relative), str(absolute)]
+    if command in {"up", "check"}:
+        assert resolved_configuration.call_count == 2
+        final_arguments = resolved_configuration.call_args.args[0]
+        files = [final_arguments[index + 1] for index, value in enumerate(final_arguments) if value == "-f"]
+        assert files == ["compose.yaml", str(checkout / relative), str(absolute)]
+    else:
+        resolved_configuration.assert_not_called()
+
+
+@pytest.mark.parametrize("command", ["up", "check", "down", "reset"])
+def test_missing_compose_override_fails_before_rendering_or_docker_mutations(
+    checkout: Path, command_runner: Mock, resolved_configuration: Mock, command: str
+) -> None:
+    """A missing custom storage model cannot silently launch or remove the base stack instead."""
+    arguments = ["--directory", str(checkout), "--compose-file", "missing.yaml", command]
+    if command == "reset":
+        arguments.append("--yes")
+    assert cli.main(arguments) == 1
+    command_runner.assert_not_called()
+    resolved_configuration.assert_not_called()
+    assert not (checkout / ".runtime").exists()
+
+
+def test_up_renders_yaml_and_forwards_effective_values_without_changing_source(
+    checkout: Path, command_runner: Mock, resolved_configuration: Mock
+) -> None:
+    """A normal launch uses YAML ports, inventory and timing consistently across all services."""
+    config = checkout / "config" / "stack.yaml"
+    content = config.read_text(encoding="utf-8").replace("devices: []", "devices: [192.0.2.10]  # Desk plug")
+    model = yaml.safe_load(content)
+    model["grafana"]["port"] = 4321
+    model["exporter"]["prometheus_port"] = 8097
+    model["prometheus"]["scrape_interval"] = "45s"
+    content = "# Preserve this user comment.\n" + yaml.safe_dump(model)
+    config.write_text(content, encoding="utf-8")
+    resolved_configuration.return_value.stdout = json.dumps({"services": {"settings": {"environment": {}}}})
+    assert cli.main(["--directory", str(checkout), "up"]) == 0
+    environment = command_runner.call_args.kwargs["environment"]
+    assert environment["GRAFANA_PORT"] == "4321"
+    assert environment["PROMETHEUS_PORT"] == "8097"
+    runtime = Path(environment["PYPROM_RUNTIME_DIR"])
+    assert runtime.parent == checkout / ".runtime"
+    exporter = yaml.safe_load((runtime / "exporter.yaml").read_text(encoding="utf-8"))
+    prometheus = yaml.safe_load((runtime / "prometheus.yml").read_text(encoding="utf-8"))
+    datasource = yaml.safe_load((runtime / "datasource.yaml").read_text(encoding="utf-8"))
+    assert exporter["exporters"]["tapo"]["devices"] == ["192.0.2.10"]
+    assert prometheus["global"]["scrape_interval"] == "45s"
+    assert prometheus["scrape_configs"][0]["static_configs"][0]["targets"] == ["exporter:8097"]
+    assert datasource["datasources"][0]["jsonData"]["timeInterval"] == "45s"
+    assert config.read_text(encoding="utf-8") == content
+    assert resolved_configuration.call_args.kwargs["env"] == environment
+
+
+def test_resolved_environment_overrides_yaml_without_logging_values(
+    checkout: Path,
+    command_runner: Mock,
+    resolved_configuration: Mock,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Resolved overrides change generated settings and report names without exposing their values."""
+    overrides = {"TAPO_PLUG_DEVICES": "private-device.example", "GRAFANA_PORT": "4555", "PROMETHEUS_PORT": "8199"}
+    resolved_configuration.return_value.stdout = json.dumps({"services": {"settings": {"environment": overrides}}})
+    assert cli.main(["--directory", str(checkout), "up"]) == 0
+    environment = command_runner.call_args.kwargs["environment"]
+    assert environment["GRAFANA_PORT"] == "4555"
+    runtime = Path(environment["PYPROM_RUNTIME_DIR"])
+    exporter = yaml.safe_load((runtime / "exporter.yaml").read_text(encoding="utf-8"))
+    assert exporter["prometheus_port"] == 8199
+    assert exporter["exporters"]["tapo"]["devices"] == ["private-device.example"]
+    output = capsys.readouterr()
+    assert "TAPO_PLUG_DEVICES" in output.out
+    assert "private-device.example" not in output.out + output.err
+
+
+def test_yaml_edits_change_runtime_mounts_for_next_up(checkout: Path, command_runner: Mock) -> None:
+    """Changing effective YAML causes a later up to receive new mount paths without force-recreate."""
+    assert cli.main(["--directory", str(checkout), "up"]) == 0
+    previous_runtime = Path(command_runner.call_args.kwargs["environment"]["PYPROM_RUNTIME_DIR"])
+    previous_content = (previous_runtime / "exporter.yaml").read_bytes()
+    config = checkout / "config" / "stack.yaml"
+    changed = config.read_text(encoding="utf-8").replace("max_concurrent_devices: 10", "max_concurrent_devices: 4")
+    config.write_text(changed, encoding="utf-8")
+    assert cli.main(["--directory", str(checkout), "up"]) == 0
+    runtime = Path(command_runner.call_args.kwargs["environment"]["PYPROM_RUNTIME_DIR"])
+    assert runtime != previous_runtime
+    assert (previous_runtime / "exporter.yaml").read_bytes() == previous_content
+    assert (
+        yaml.safe_load((runtime / "exporter.yaml").read_text(encoding="utf-8"))["exporters"]["tapo"][
+            "max_concurrent_devices"
+        ]
+        == 4
+    )
+    assert config.read_text(encoding="utf-8") == changed

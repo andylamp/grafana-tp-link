@@ -3,6 +3,7 @@
 
 """Serve deterministic fake-device samples inside the isolated test network."""
 
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -24,4 +25,4 @@ class MetricsHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    HTTPServer(("", 8090), MetricsHandler).serve_forever()
+    HTTPServer(("", int(os.getenv("PROMETHEUS_PORT", "8090"))), MetricsHandler).serve_forever()

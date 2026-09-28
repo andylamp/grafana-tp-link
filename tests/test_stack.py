@@ -10,27 +10,33 @@ from pathlib import Path
 
 import yaml
 
-from tests.integration.support import TEST_PASSWORD, isolated_exporter_configuration, mapping
+from grafana_tp_link.configuration import load_configuration, render_configuration
+from tests.integration.support import TEST_PASSWORD, isolated_exporter_configuration, mapping, prepare_checkout
 from tests.integration.test_stack_smoke import expand, expressions
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_scraping_uses_single_exporter_and_a_compatible_deadline() -> None:
+def test_scraping_uses_single_exporter_and_a_compatible_deadline(tmp_path: Path) -> None:
     """Prometheus should scrape the exporter once with room for HTTP transport."""
-    prometheus = mapping(yaml.safe_load((ROOT / "prometheus/prometheus.yml").read_text()))
+    prepare_checkout(tmp_path)
+    configuration = load_configuration(tmp_path, {}, require_devices=False)
+    runtime = render_configuration(tmp_path, configuration)
+    prometheus = mapping(yaml.safe_load((runtime / "prometheus.yml").read_text()))
+    config = mapping(yaml.safe_load((runtime / "exporter.yaml").read_text()))
     jobs = prometheus["scrape_configs"]
     assert isinstance(jobs, list)
     job = next(mapping(value) for value in jobs if mapping(value)["job_name"] == "pyprom-exporters")
-    assert job["static_configs"] == [{"targets": ["exporter:8090"]}]
+    assert job["static_configs"] == [{"targets": [f"exporter:{config['prometheus_port']}"]}]
     assert job["metrics_path"] == "/metrics"
     assert "relabel_configs" not in job
-    config = mapping(yaml.safe_load((ROOT / "config/exporter.yaml").read_text()))
     exporter = mapping(mapping(config["exporters"])["tapo"])
     assert mapping(exporter["discovery_options"])["perform_discovery"] is False
     assert isinstance(exporter["devices"], list)
     timeout = mapping(prometheus["global"])["scrape_timeout"]
     interval = mapping(prometheus["global"])["scrape_interval"]
+    assert timeout == mapping(configuration["prometheus"])["scrape_timeout"]
+    assert interval == mapping(configuration["prometheus"])["scrape_interval"]
     assert float(str(mapping(exporter["prometheus_options"])["scrape_timeout"])) < float(
         str(timeout).removesuffix("s")
     )
