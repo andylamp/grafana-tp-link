@@ -356,6 +356,19 @@ Choose **Dashboards → New → Import**, upload the file, and select a Promethe
 **Data source** variable. The provisioned source has UID `prometheus`; the dashboard UID is `tp-link-power`.
 Choose the job and exporter filters if your scrape labels differ.
 
+Compact legends sit below each graph, leaving its full width available for readings. Legend entries flow into multiple
+columns when space permits; Grafana's native legend does not enforce a fixed column count. Longer lists scroll within
+the legend. Hover a graph to see its device labels and values, or click a legend entry to focus a series.
+
+Every device uses the same identity: **alias · host [job / exporter]**. The host and exporter distinguish plugs with
+identical aliases or overlapping address spaces. Colors follow this complete name across graphs and ranked readings,
+even when ranking or filters change. Grafana's finite palette can reuse a color, so use the label to identify a device.
+The selected power total is a separate dashed, neutral-colored line.
+
+Current-load and Wi-Fi panels retain labels beside each reading, including when only one device is selected. Wi-Fi rows
+put the weakest signal first; values closer to zero are stronger. Their colors identify devices, matching the graphs,
+rather than classifying signal quality.
+
 The provisioned dashboard is managed by its JSON file. Save customizations back to `dash.json`, or make a separate
 Grafana copy with a different UID. Provisioning updates the managed dashboard from disk; UI changes are disabled for it.
 

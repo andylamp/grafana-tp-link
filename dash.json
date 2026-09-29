@@ -18,7 +18,7 @@
       },
       "id": 1,
       "options": {
-        "content": "**Power in W \u00b7 energy in Wh \u00b7 exporter health.** Filter your devices above.  \nEnergy follows each plug\u2019s calendar. Blank readings mean unavailable data.",
+        "content": "**Power in W \u00b7 energy in Wh \u00b7 exporter health.** Filter devices above. Compact legends below each graph identify devices; hover a line for its label and value. The dashed line is total power. Colours can repeat.",
         "mode": "markdown"
       },
       "title": "Read the fleet at a glance",
@@ -111,7 +111,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "min(up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"})",
+          "expr": "min(up{job=~\"${job}\",instance=~\"${exporter}\"})",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -178,7 +178,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "count((current_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "count((current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -244,7 +244,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum((current_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "sum((current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -310,7 +310,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum((current_consumption_today{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "sum((current_consumption_today{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -376,7 +376,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum((current_month_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "sum((current_month_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -442,7 +442,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "max(time() - timestamp(up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}))",
+          "expr": "max(time() - timestamp(up{job=~\"${job}\",instance=~\"${exporter}\"}))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -471,11 +471,11 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Instantaneous watts per device and the sum of available readings. Gaps remain visible; a zero reading is a real reported zero. Host and exporter distinguish repeated aliases.",
+      "description": "Instantaneous watts per device and the sum of available readings. Gaps remain visible; a zero reading is a real reported zero. Host and exporter distinguish repeated aliases. Device colors follow their legend names across panels. The dashed neutral line is the selected total.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -534,20 +534,30 @@
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "purple",
+                  "fixedColor": "text",
                   "mode": "fixed"
                 }
               },
               {
                 "id": "custom.fillOpacity",
                 "value": 0
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    8,
+                    5
+                  ],
+                  "fill": "dash"
+                }
               }
             ]
           }
         ]
       },
       "gridPos": {
-        "h": 8,
+        "h": 14,
         "w": 16,
         "x": 0,
         "y": 9
@@ -555,16 +565,14 @@
       "id": 10,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -576,9 +584,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
           "range": true,
           "refId": "A"
         },
@@ -588,7 +596,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum((current_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "sum((current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": false,
           "legendFormat": "Selected total",
           "range": true,
@@ -603,12 +611,13 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Up to ten selected devices with the highest current reported wattage. Rankings omit unavailable readings.",
+      "description": "Up to ten selected devices with the highest current reported wattage. Rankings omit unavailable readings. Each row names its device, host and exporter; colors match the history panels even when ranking changes.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
+          "displayName": "${__field.name}",
           "mappings": [],
           "min": 0,
           "noValue": "No data",
@@ -626,16 +635,16 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 14,
         "w": 8,
         "x": 16,
         "y": 9
       },
       "id": 11,
       "options": {
-        "displayMode": "gradient",
-        "maxVizHeight": 80,
-        "minVizHeight": 24,
+        "displayMode": "basic",
+        "maxVizHeight": 52,
+        "minVizHeight": 52,
         "minVizWidth": 0,
         "namePlacement": "top",
         "orientation": "horizontal",
@@ -647,12 +656,12 @@
           "values": false
         },
         "showUnfilled": true,
-        "sizing": "auto",
+        "sizing": "manual",
         "text": {
-          "titleSize": 14,
-          "valueSize": 22
+          "titleSize": 13,
+          "valueSize": 17
         },
-        "valueMode": "color"
+        "valueMode": "text"
       },
       "targets": [
         {
@@ -661,14 +670,39 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "topk(10, (current_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "topk(10, (current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
           "range": false,
           "refId": "A"
         }
       ],
       "title": "Largest loads now \u00b7 top 10",
+      "transformations": [
+        {
+          "id": "seriesToRows",
+          "options": {}
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "Metric",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "Value",
+                "handlerKey": "field.value"
+              },
+              {
+                "fieldName": "Time",
+                "handlerKey": "__ignore"
+              }
+            ]
+          }
+        }
+      ],
       "type": "bargauge"
     },
     {
@@ -678,7 +712,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 23
       },
       "id": 12,
       "panels": [],
@@ -694,7 +728,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -742,24 +776,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 12,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 24
       },
       "id": 13,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -771,9 +803,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_consumption_today{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_consumption_today{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
           "range": true,
           "refId": "A"
         }
@@ -790,7 +822,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -838,24 +870,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 12,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 24
       },
       "id": 14,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -867,9 +897,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_month_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_month_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
           "range": true,
           "refId": "A"
         }
@@ -884,7 +914,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 36
       },
       "id": 15,
       "panels": [],
@@ -900,7 +930,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -948,24 +978,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 12,
         "w": 12,
         "x": 0,
-        "y": 27
+        "y": 37
       },
       "id": 16,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -977,9 +1005,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_voltage{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_voltage{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
           "range": true,
           "refId": "A"
         }
@@ -996,7 +1024,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -1044,24 +1072,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 12,
         "w": 12,
         "x": 12,
-        "y": 27
+        "y": 37
       },
       "id": 17,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -1073,9 +1099,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_current{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_current{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
           "range": true,
           "refId": "A"
         }
@@ -1090,7 +1116,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 49
       },
       "id": 18,
       "panels": [],
@@ -1106,7 +1132,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -1153,24 +1179,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 14,
         "w": 12,
         "x": 0,
-        "y": 36
+        "y": 50
       },
       "id": 19,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -1182,9 +1206,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_rssi{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_rssi{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
           "range": true,
           "refId": "A"
         }
@@ -1197,13 +1221,14 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Signal strength where supported. Indicative display bands: below \u221280 dBm weak, \u221280 to \u221265 dBm fair, above \u221265 dBm stronger. These are display guidance, not alerts.",
+      "description": "Current Wi-Fi signal in dBm, weakest first. Values closer to 0 indicate stronger received signal. Colors identify devices and match their history traces; they do not classify signal quality. Rows include device alias, host and exporter so identical aliases remain distinguishable. Missing readings remain absent; scrape success does not establish device-reading freshness.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic-by-name"
           },
           "decimals": 0,
+          "displayName": "${__field.name}",
           "mappings": [],
           "max": 0,
           "min": -100,
@@ -1212,16 +1237,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "blue",
                 "value": null
-              },
-              {
-                "color": "orange",
-                "value": -80
-              },
-              {
-                "color": "green",
-                "value": -65
               }
             ]
           },
@@ -1230,16 +1247,16 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 14,
         "w": 12,
         "x": 12,
-        "y": 36
+        "y": 50
       },
       "id": 20,
       "options": {
-        "displayMode": "gradient",
-        "maxVizHeight": 80,
-        "minVizHeight": 24,
+        "displayMode": "basic",
+        "maxVizHeight": 52,
+        "minVizHeight": 52,
         "minVizWidth": 0,
         "namePlacement": "top",
         "orientation": "horizontal",
@@ -1251,12 +1268,12 @@
           "values": false
         },
         "showUnfilled": true,
-        "sizing": "auto",
+        "sizing": "manual",
         "text": {
-          "titleSize": 14,
-          "valueSize": 22
+          "titleSize": 13,
+          "valueSize": 17
         },
-        "valueMode": "color"
+        "valueMode": "text"
       },
       "targets": [
         {
@@ -1265,14 +1282,39 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_rssi{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "sort((current_rssi{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
           "range": false,
           "refId": "A"
         }
       ],
       "title": "Wi-Fi signal now",
+      "transformations": [
+        {
+          "id": "seriesToRows",
+          "options": {}
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "Metric",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "Value",
+                "handlerKey": "field.value"
+              },
+              {
+                "fieldName": "Time",
+                "handlerKey": "__ignore"
+              }
+            ]
+          }
+        }
+      ],
       "type": "bargauge"
     },
     {
@@ -1282,7 +1324,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 64
       },
       "id": 21,
       "panels": [],
@@ -1320,7 +1362,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 45
+        "y": 65
       },
       "id": 22,
       "options": {
@@ -1345,7 +1387,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(tapo_discovered_devices{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "sum(tapo_discovered_devices{job=~\"${job}\",instance=~\"${exporter}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1386,7 +1428,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 45
+        "y": 65
       },
       "id": 23,
       "options": {
@@ -1411,7 +1453,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(scrape_samples_scraped{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"})",
+          "expr": "sum(scrape_samples_scraped{job=~\"${job}\",instance=~\"${exporter}\"})",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1452,7 +1494,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 45
+        "y": 65
       },
       "id": 24,
       "options": {
@@ -1477,7 +1519,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "max(scrape_duration_seconds{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"})",
+          "expr": "max(scrape_duration_seconds{job=~\"${job}\",instance=~\"${exporter}\"})",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1518,7 +1560,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 45
+        "y": 65
       },
       "id": 25,
       "options": {
@@ -1543,7 +1585,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(process_resident_memory_bytes{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "sum(process_resident_memory_bytes{job=~\"${job}\",instance=~\"${exporter}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1584,7 +1626,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 45
+        "y": 65
       },
       "id": 26,
       "options": {
@@ -1609,7 +1651,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(process_cpu_seconds_total{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}[$__rate_interval]) and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "sum(rate(process_cpu_seconds_total{job=~\"${job}\",instance=~\"${exporter}\"}[$__rate_interval]) and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1650,7 +1692,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 45
+        "y": 65
       },
       "id": 27,
       "options": {
@@ -1675,7 +1717,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "count(up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"})",
+          "expr": "count(up{job=~\"${job}\",instance=~\"${exporter}\"})",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1694,7 +1736,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -1741,24 +1783,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 12,
         "x": 0,
-        "y": 49
+        "y": 69
       },
       "id": 28,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -1770,9 +1810,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "scrape_duration_seconds{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}",
+          "expr": "scrape_duration_seconds{job=~\"${job}\",instance=~\"${exporter}\"}",
           "instant": false,
-          "legendFormat": "{{instance}}",
+          "legendFormat": "{{job}} / {{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -1789,7 +1829,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -1853,24 +1893,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 12,
         "x": 12,
-        "y": 49
+        "y": 69
       },
       "id": 29,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -1882,9 +1920,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}",
+          "expr": "up{job=~\"${job}\",instance=~\"${exporter}\"}",
           "instant": false,
-          "legendFormat": "{{instance}}",
+          "legendFormat": "{{job}} / {{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -1895,10 +1933,10 @@
     {
       "description": "",
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 79
       },
       "id": 30,
       "options": {
@@ -1970,7 +2008,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(up{job=~\"${job:regex}\"}, instance)",
+        "definition": "label_values(up{job=~\"${job}\"}, instance)",
         "hide": 0,
         "includeAll": true,
         "label": "Exporter",
@@ -1978,7 +2016,7 @@
         "name": "exporter",
         "options": [],
         "query": {
-          "query": "label_values(up{job=~\"${job:regex}\"}, instance)",
+          "query": "label_values(up{job=~\"${job}\"}, instance)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
@@ -1996,7 +2034,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}, host)",
+        "definition": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job}\",instance=~\"${exporter}\"}, host)",
         "hide": 0,
         "includeAll": true,
         "label": "Host",
@@ -2004,7 +2042,7 @@
         "name": "host",
         "options": [],
         "query": {
-          "query": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}, host)",
+          "query": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job}\",instance=~\"${exporter}\"}, host)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
@@ -2022,7 +2060,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\"}, alias)",
+        "definition": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\"}, alias)",
         "hide": 0,
         "includeAll": true,
         "label": "Device",
@@ -2030,7 +2068,7 @@
         "name": "device",
         "options": [],
         "query": {
-          "query": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\"}, alias)",
+          "query": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\"}, alias)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
@@ -2057,5 +2095,5 @@
   "timezone": "browser",
   "title": "TP-Link \u00b7 Power & Energy",
   "uid": "tp-link-power",
-  "version": 1
+  "version": 2
 }

@@ -94,15 +94,19 @@ def test_all_queries_use_the_selected_prometheus_datasource(dashboard: JSON) -> 
     for variable in variables.values():
         if variable["type"] == "query":
             assert variable["datasource"] == DATASOURCE
+            assert ":regex}" not in variable["query"]["query"]
+            assert ":regex}" not in variable["definition"]
     for panel in dashboard["panels"]:
         for target in panel.get("targets", []):
             assert panel["datasource"] == DATASOURCE
             assert target["datasource"] == DATASOURCE
             assert target["expr"].strip()
+            # The generic :regex formatter emits invalid single backslashes in PromQL strings.
+            assert ":regex}" not in target["expr"]
 
 
 def test_device_filters_support_regex_safe_multiple_and_all_selections(dashboard: JSON) -> None:
-    """Dots in hosts and special characters in aliases must not broaden selections."""
+    """Let Prometheus escape both regex syntax and quoted PromQL string literals."""
     variables = {variable["name"]: variable for variable in dashboard["templating"]["list"]}
     for name in ("job", "exporter", "host", "device"):
         variable = variables[name]
@@ -110,7 +114,7 @@ def test_device_filters_support_regex_safe_multiple_and_all_selections(dashboard
         assert variable["includeAll"] is True
         assert variable["allValue"] == ".*"
         assert variable["options"] == []
-    assert "${host:regex}" in variables["device"]["query"]["query"]
+    assert "${host}" in variables["device"]["query"]["query"]
     assert variables["host"]["current"]["value"] == "$__all"
     assert variables["device"]["current"]["value"] == "$__all"
 
@@ -123,12 +127,12 @@ def test_query_selectors_match_exporter_metrics_and_device_labels(dashboard: JSO
             expression = target["expr"]
             for metric, labels in SELECTOR.findall(expression):
                 assert metric in DEVICE_UNITS or metric in INFRASTRUCTURE_METRICS, metric
-                assert 'job=~"${job:regex}"' in labels
-                assert 'instance=~"${exporter:regex}"' in labels
+                assert 'job=~"${job}"' in labels
+                assert 'instance=~"${exporter}"' in labels
                 if metric in DEVICE_UNITS:
                     queried_device_metrics.add(metric)
-                    assert 'host=~"${host:regex}"' in labels
-                    assert 'alias=~"${device:regex}"' in labels
+                    assert 'host=~"${host}"' in labels
+                    assert 'alias=~"${device}"' in labels
                     assert "and on (job, instance)" in expression
                     assert " == 1" in expression
                     if panel["type"] in {"timeseries", "bargauge"} and not expression.startswith("sum("):
@@ -180,3 +184,100 @@ def test_health_panels_do_not_invent_device_freshness_or_online_state(dashboard:
     assert "older snapshot" in guidance
     assert "exporter logs" in guidance
     assert "not counters" in guidance
+
+
+def test_device_series_share_identity_and_name_based_colors(dashboard: JSON) -> None:
+    """Rank changes, filtering and a single result must not remap a device's color."""
+    device_legend = "{{alias}} · {{host}} [{{job}} / {{instance}}]"
+    matched_panels = set()
+    for panel in dashboard["panels"]:
+        if panel["type"] not in {"timeseries", "bargauge", "table"}:
+            continue
+        device_targets = [
+            target
+            for target in panel.get("targets", [])
+            if not target["expr"].startswith("sum(")
+            and any(metric in DEVICE_UNITS for metric, _labels in SELECTOR.findall(target["expr"]))
+        ]
+        if not device_targets:
+            continue
+        matched_panels.add(panel["id"])
+        assert panel["fieldConfig"]["defaults"]["color"]["mode"] == "palette-classic-by-name"
+        for target in device_targets:
+            assert target["legendFormat"] == device_legend
+        for override in panel["fieldConfig"]["overrides"]:
+            for setting in override["properties"]:
+                if setting["id"] == "color":
+                    # The aggregate has a separate identity; device colors remain automatic.
+                    assert override["matcher"] == {"id": "byName", "options": "Selected total"}
+                    assert setting["value"]["mode"] == "fixed"
+    assert matched_panels
+
+
+@pytest.mark.parametrize("panel_id", [11, 20])
+def test_current_device_panels_preserve_readable_names_and_colors(dashboard: JSON, panel_id: int) -> None:
+    """Show identity even for a singleton result and keep many bars readable by scrolling."""
+    panel = next(panel for panel in dashboard["panels"] if panel["id"] == panel_id)
+    assert panel["type"] == "bargauge"
+    assert panel["fieldConfig"]["defaults"]["displayName"] == "${__field.name}"
+    transformations = panel["transformations"]
+    assert [transform["id"] for transform in transformations] == ["seriesToRows", "rowsToFields"]
+    fields = transformations[1]["options"]["mappings"]
+    assert {field["fieldName"]: field["handlerKey"] for field in fields} == {
+        "Metric": "field.name",
+        "Value": "field.value",
+        "Time": "__ignore",
+    }
+    options = panel["options"]
+    assert options["orientation"] == "horizontal"
+    assert options["namePlacement"] == "top"
+    assert options["sizing"] == "manual"
+    assert options["minVizHeight"] >= 48
+    assert options["displayMode"] == "basic"
+    assert options["valueMode"] == "text"
+
+
+def test_device_trends_keep_compact_legends_below_plots(dashboard: JSON) -> None:
+    """Wrapped labels below each graph preserve plot width and keep color identity nearby."""
+    for panel in dashboard["panels"]:
+        if panel["type"] != "timeseries":
+            continue
+        if not any(
+            metric in DEVICE_UNITS
+            for target in panel["targets"]
+            for metric, _labels in SELECTOR.findall(target["expr"])
+        ):
+            continue
+        legend = panel["options"]["legend"]
+        assert legend["placement"] == "bottom"
+        assert legend["displayMode"] == "list"
+        assert legend["calcs"] == []
+        assert legend["showLegend"] is True
+        assert panel["options"]["tooltip"]["mode"] == "multi"
+        assert panel["fieldConfig"]["defaults"]["custom"]["hideFrom"] == {
+            "legend": False,
+            "tooltip": False,
+            "viz": False,
+        }
+
+
+def test_current_wifi_ranks_weakest_first_without_replacing_device_colors(dashboard: JSON) -> None:
+    """Keep RSSI interpretation numerical while preserving the same per-device color."""
+    panel = next(panel for panel in dashboard["panels"] if panel["id"] == 20)
+    assert panel["targets"][0]["expr"].startswith("sort(")
+    defaults = panel["fieldConfig"]["defaults"]
+    assert defaults["unit"] == "dBm"
+    assert defaults["min"] == -100
+    assert defaults["max"] == 0
+    assert defaults["color"]["mode"] == "palette-classic-by-name"
+
+
+def test_exporter_trends_keep_job_identity_and_stable_colors(dashboard: JSON) -> None:
+    """Different jobs sharing an instance label must have distinct stable legend names."""
+    panels = [panel for panel in dashboard["panels"] if panel["id"] in {28, 29}]
+    assert len(panels) == 2
+    for panel in panels:
+        assert panel["fieldConfig"]["defaults"]["color"]["mode"] == "palette-classic-by-name"
+        assert all(target["legendFormat"] == "{{job}} / {{instance}}" for target in panel["targets"])
+        assert panel["options"]["legend"]["placement"] == "bottom"
+        assert panel["options"]["legend"]["showLegend"] is True
