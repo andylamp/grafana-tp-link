@@ -65,7 +65,8 @@ with Prometheus 3.x. Check readiness, historical queries and logs at that step. 
 bridge; Prometheus 3 data cannot be read by versions older than 2.55. Read the
 [Prometheus 3 migration guide][prometheus-migration] and [3.0 release guidance][prometheus-release].
 
-Review retention before opening the copied store. This stack defaults to three years or 10 GB of stored blocks,
+Review `prometheus.retention_time` and `prometheus.retention_size` in `config/stack.yaml` before opening the copied store.
+This stack defaults to three years or 10 GB of stored blocks,
 whichever limit is reached first; shorter limits can remove historical data from the working copy.
 Keep the original backup outside the active data directory.
 
@@ -90,38 +91,41 @@ docker image inspect --format '{{.Config.User}}' \
 Adjust ownership of the working copy for your Docker environment; rootless Docker and user namespaces can change how
 container IDs map onto the host. Do not recursively change ownership of the original backup.
 
-After the copied store has passed the staged upgrade, create an ignored `compose.override.yaml`:
+After the copied store has passed the staged upgrade, set its path in the existing `prometheus` section of
+`config/stack.yaml` (or your selected stack YAML), retaining the section's other settings:
 
 ```yaml
-services:
-  prometheus:
-    volumes:
-      - type: bind
-        source: ./data/prometheus
-        target: /prometheus
-        bind:
-          create_host_path: false
+prometheus:
+  data_directory: ./data/prometheus
 ```
 
-The override replaces the storage mount with the matching container target while retaining the read-only configuration
-mounts. `create_host_path: false` makes a missing working directory fail rather than silently create empty storage.
-Compose's [merge rules][compose-merge] define this behavior.
-
-Pass both files explicitly:
+Relative paths resolve from the checkout, including when selecting a YAML file outside it. The generated bind mount
+uses `/prometheus` inside the container and retains the read-only configuration mounts.
+`create_host_path: false` makes a missing working directory fail rather than silently create empty storage.
+Validate and start through the utility so it renders configuration and storage settings:
 
 ```sh
-docker compose --env-file .env -f compose.yaml -f compose.override.yaml config --quiet
-docker compose --env-file .env -f compose.yaml -f compose.override.yaml up -d --wait
+uv run --locked power-monitor check
+uv run --locked power-monitor up
 ```
 
-The `power-monitor` utility selects `compose.yaml` explicitly and does not load this override.
-For a deployment using it, continue passing both files to lifecycle commands:
+For an alternative stack file, use `power-monitor --config config.local.yaml check` and the same selection for `up`.
+A different YAML file does not select a different Compose project or migrate data. Select separate project names
+and separate storage when rehearsing an independent deployment. Do not substitute raw `docker compose up`, which
+skips rendering the unified configuration.
+
+If migrating from a previous local Compose storage override, remove the duplicate storage entries after transferring
+their paths into YAML. Explicit `--compose-file` overrides are applied last and can override generated YAML storage.
+Retain any unrelated custom options. Advanced service customization can still use:
 
 ```sh
-docker compose --env-file .env -f compose.yaml -f compose.override.yaml ps
-docker compose --env-file .env -f compose.yaml -f compose.override.yaml logs --tail 100 prometheus
-docker compose --env-file .env -f compose.yaml -f compose.override.yaml down
+uv run --locked power-monitor --compose-file compose.override.yaml up
+uv run --locked power-monitor --compose-file compose.override.yaml down
 ```
+
+The base Compose file is loaded first, generated storage follows for `check`/`up`, and explicit override files follow
+in order. Their [merge rules][compose-merge] apply. Retain the same explicit overrides for all lifecycle commands,
+including reset. YAML-selected host directories are retained by `reset --yes`, as are explicitly overridden bind mounts.
 
 Confirm that historical queries still work and that new `current_consumption` samples arrive before retiring the old
 installation. Keep the original backup for rollback; opening an upgraded store with an older binary is not a substitute
@@ -147,23 +151,17 @@ using Grafana environment settings or a read-only configuration mount. For examp
 copying its file or the database alone does not apply those settings.
 
 Once a copied SQLite data directory is verified with the target version, put it at an ignored path such as `data/grafana`.
-Add this service entry alongside any Prometheus override:
+Set its path in the existing `grafana` section of the same stack YAML:
 
 ```yaml
-services:
-  grafana:
-    volumes:
-      - type: bind
-        source: ./data/grafana
-        target: /var/lib/grafana
-        bind:
-          create_host_path: false
+grafana:
+  data_directory: ./data/grafana
 ```
 
-Merge both service entries into one `services` mapping if preserving both databases.
-Confirm that the copied data is writable by the pinned Grafana image's configured user and that the resolved mounts still
-include the repository's datasource provisioning, dashboard provider and `dash.json`.
-Use the same explicit two-file Compose commands above for this deployment.
+Confirm that the copied data is writable by the pinned Grafana image's configured user. The utility retains the
+rendered datasource configuration, dashboard provider and `dash.json` mounts. Use the same `check` and `up` commands
+shown above, including `--config` when selecting a custom stack file. If you require additional Grafana environment or
+configuration mounts, retain those in your explicit `--compose-file` override and pass it to each lifecycle command.
 
 Changing `GRAFANA_ADMIN_PASSWORD` in `.env` does not reset an existing database's administrator password.
 Use the existing account or Grafana's documented reset procedure. Review datasource UID `prometheus`, folder UID
@@ -172,11 +170,30 @@ Keep the old dashboard under a separate UID if you want to retain it for histori
 
 ## Metric and dashboard changes
 
-Prometheus now scrapes one aggregate endpoint at `exporter:8090/metrics` with job `pyprom-exporters`.
-Explicit device hosts belong in `TAPO_PLUG_DEVICES`;
-the old per-device scrape target/relabel configuration is no longer used.
-The endpoint probes devices concurrently. Its scrape timeout is 25 seconds, its interval is 30 seconds, and the exporter's
-live-refresh wait is 20 seconds by default.
+Prometheus now scrapes one aggregate endpoint, normally `exporter:8090/metrics`, with job `pyprom-exporters`.
+All noncredential settings now live in `config/stack.yaml`. Configure explicit hosts under
+`exporter.exporters.tapo.devices`, one address per YAML entry. Inline comments can describe each plug.
+The old per-device scrape target/relabel configuration is no longer used.
+See the [YAML inventory example](../README.md#quick-start); credentials remain in `.env`.
+
+When migrating from an earlier version of this branch, move native exporter settings from `config/exporter.yaml`
+under the `exporter` section of `config/stack.yaml`. Move noncredential `.env` settings into their corresponding
+`grafana`, `prometheus` or `exporter` YAML sections, then remove or comment out those environment overrides.
+The [override table](../README.md#optional-environment-overrides) maps the supported variables to YAML settings.
+Account credentials stay in `.env`; do not copy them into YAML.
+
+A nonempty resolved `TAPO_PLUG_DEVICES` still replaces the entire YAML list. Clear an old list in `.env` and unset
+any exported shell value when switching to YAML. Shell values take precedence over `.env`; empty resolved values use
+YAML, while whitespace/comma-only lists are rejected. `check` and `up` require at least one explicit host.
+
+Use `power-monitor check`, then `power-monitor up` after YAML or environment changes. The utility writes credential-free
+native configuration into ignored `.runtime/<digest>/` directories, preserving the source YAML and its comments.
+Changed mount paths cause `up` to recreate affected containers with their existing data volumes; no manual restart is needed.
+The same selected YAML also controls both data directories; include `--config` on both commands when using a custom file.
+Explicit Compose overrides, if still needed for advanced settings, follow generated storage settings.
+
+The default scrape timeout is 25 seconds, its interval is 30 seconds, and the exporter's live-refresh wait is 20 seconds.
+The renderer keeps the scrape target and Grafana datasource interval aligned with your YAML configuration.
 
 | Previous dashboard concept | New metric or behavior |
 | --- | --- |

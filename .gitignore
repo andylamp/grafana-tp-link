@@ -15,9 +15,11 @@ build/
 *.egg-info/
 .idea/
 .DS_Store
+# Local configuration profiles, audit notes and scratch files.
 scratch/
 report/
 data/
 secrets/
 config.local.yaml
 compose.override.yaml
+.runtime/

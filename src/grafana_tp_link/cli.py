@@ -1,6 +1,6 @@
 # Copyright (c) 2026 grafana-tp-link contributors
 # SPDX-License-Identifier: GPL-3.0-only
-"""Operate the checked-out Compose stack without deleting persistent data."""
+"""Operate the checked-out Compose stack, preserving data unless reset is explicitly requested."""
 
 from __future__ import annotations
 
@@ -8,12 +8,26 @@ import argparse
 import json
 import os
 import secrets
+import shlex
 import shutil
 import subprocess  # nosec B404 # ruff: ignore[suspicious-subprocess-import]
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import cast
+
+import yaml
+
+from grafana_tp_link.configuration import (
+    OVERRIDE_NAMES,
+    compose_environment,
+    load_configuration,
+    render_configuration,
+)
+from grafana_tp_link.status_output import report_startup
 
 SERVICES = ("exporter", "prometheus", "grafana")
+GRAFANA_BOOTSTRAP_LABEL = "power-monitor.grafana-password-configured"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -28,11 +42,35 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--directory", type=Path, default=Path.cwd(), help="Checkout directory (default: current directory)"
     )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=Path("config/stack.yaml"),
+        help="Stack YAML for check/up, relative to the checkout (default: config/stack.yaml)",
+    )
+    parser.add_argument(
+        "--compose-file",
+        type=Path,
+        action="append",
+        default=[],
+        help="Additional Compose override file, relative to the checkout (repeatable)",
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="Create a private .env once; preserve any existing configuration")
     commands.add_parser("check", help="Validate Compose and Prometheus configuration without probing devices")
     commands.add_parser("up", help="Start services and wait for health checks")
     commands.add_parser("down", help="Stop this stack and preserve its persistent data volumes")
+    reset = commands.add_parser(
+        "reset",
+        help="Delete this stack's containers and managed data volumes",
+        description=(
+            "Delete this Compose project's containers, networks and managed data volumes. "
+            "Keep local configuration, images, external volumes and host directories. Run up to start fresh."
+        ),
+    )
+    reset.add_argument(
+        "--yes", action="store_true", required=True, help="Confirm permanent deletion of this stack's data"
+    )
     commands.add_parser("status", help="Show service status")
     commands.add_parser("pull", help="Download the pinned service images")
     logs = commands.add_parser("logs", help="Show recent logs")
@@ -65,7 +103,7 @@ def _initialize(directory: Path) -> None:
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write("\n".join(lines) + "\n")
     sys.stdout.write("Created .env with private permissions and a generated Grafana password.\n")
-    sys.stdout.write("Edit TAPO_PLUG_DEVICES and any required credentials before starting services.\n")
+    sys.stdout.write("Edit settings in config/stack.yaml and credentials in .env before starting services.\n")
 
 
 def _run(arguments: list[str], directory: Path, *, environment: dict[str, str] | None = None) -> int:
@@ -83,41 +121,127 @@ def _run(arguments: list[str], directory: Path, *, environment: dict[str, str] |
     return result.returncode
 
 
-def _validate_configuration(compose: list[str], directory: Path) -> int:
-    """Check effective settings without printing resolved credentials.
+def _resolve_overrides(compose: list[str], directory: Path) -> tuple[int, dict[str, str]]:
+    """Use Compose's own dotenv and shell precedence without displaying values.
 
     Returns
     -------
-    int
-        The configuration command's exit status.
+    tuple[int, dict[str, str]]
+        Compose's exit status and supported noncredential environment overrides.
 
     Raises
     ------
     ValueError
-        If the resolved configuration has no explicit device hosts or has an unexpected shape.
+        If Compose returns an unexpected configuration structure or the Grafana password is absent.
+    """
+    probe = {
+        "name": "power-monitor-settings",
+        "services": {
+            "settings": {
+                "image": "scratch",
+                "environment": {name: "${" + name + ":-}" for name in OVERRIDE_NAMES},
+                # Resolve presence only, never the credential value, using Compose's dotenv precedence.
+                "labels": {GRAFANA_BOOTSTRAP_LABEL: "${GRAFANA_ADMIN_PASSWORD:+configured}"},
+            }
+        },
+    }
+    # This file contains variable references only. Config resolution never starts a container.
+    with TemporaryDirectory(prefix="power-monitor-settings-") as temporary:
+        path = Path(temporary) / "compose.yaml"
+        path.write_text(yaml.safe_dump(probe), encoding="utf-8")
+        result = subprocess.run(  # nosec B603 # ruff: ignore[subprocess-without-shell-equals-true]
+            [*compose, "-f", str(path), "config", "--format", "json"],
+            cwd=directory,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    if result.returncode:
+        sys.stderr.write(
+            f"Compose configuration failed (exit status {result.returncode}). Check .env and shell settings.\n"
+        )
+        return result.returncode, {}
+    try:
+        settings = json.loads(result.stdout)["services"]["settings"]
+        environment = settings["environment"]
+        password_status = settings["labels"][GRAFANA_BOOTSTRAP_LABEL]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        message = "Compose did not return the expected settings environment configuration."
+        raise ValueError(message) from error
+    if not isinstance(environment, dict) or any(
+        environment.get(name) is not None and not isinstance(environment[name], str) for name in OVERRIDE_NAMES
+    ):
+        message = "Compose did not return the expected settings environment configuration."
+        raise ValueError(message)
+    if not isinstance(password_status, str) or password_status not in {"", "configured"}:
+        message = "Compose did not return the expected Grafana password presence marker."
+        raise ValueError(message)
+    if not password_status:
+        message = (
+            "GRAFANA_ADMIN_PASSWORD is missing or empty. Set it in the checkout's .env or shell environment. "
+            "An empty shell value overrides .env. Existing .env was preserved."
+        )
+        raise ValueError(message)
+    return 0, {name: environment.get(name) or "" for name in OVERRIDE_NAMES}
+
+
+def _validate_configuration(compose: list[str], directory: Path, *, environment: dict[str, str]) -> int:
+    """Validate the final Compose model without exposing resolved credentials.
+
+    Returns
+    -------
+    int
+        Compose's configuration validation exit status.
     """
     result = subprocess.run(  # nosec B603 # ruff: ignore[subprocess-without-shell-equals-true]
-        [*compose, "config", "--format", "json"], cwd=directory, check=False, capture_output=True, text=True
+        [*compose, "config", "--quiet"],
+        cwd=directory,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
     )
     if result.returncode:
         sys.stderr.write(
             f"Compose configuration failed (exit status {result.returncode}). "
-            "Check compose.yaml and .env, including TAPO_PLUG_DEVICES and GRAFANA_ADMIN_PASSWORD.\n"
+            "Check compose.yaml, override files and .env, including GRAFANA_ADMIN_PASSWORD.\n"
         )
-        return result.returncode
-    try:
-        model = json.loads(result.stdout)
-        devices = model["services"]["exporter"]["environment"]["TAPO_PLUG_DEVICES"]
-    except (json.JSONDecodeError, KeyError, TypeError) as error:
-        message = "Compose did not return the expected exporter environment configuration."
-        raise ValueError(message) from error
-    if not isinstance(devices, str) or not devices.replace(",", " ").split():
-        message = "Set TAPO_PLUG_DEVICES to at least one explicit device IP or hostname before check/up."
-        raise ValueError(message)
-    return 0
+    return result.returncode
 
 
-def _check_prometheus(compose: list[str], directory: Path) -> int:
+def _progress(message: str) -> None:
+    """Flush progress before subprocess output, including when stdout is redirected."""
+    sys.stdout.write(f"{message}\n")
+    sys.stdout.flush()
+
+
+def _configuration_summary(configuration: dict[str, object]) -> None:
+    """Describe effective collection settings without listing devices or credentials."""
+    exporter = cast("dict[str, object]", configuration["exporter"])
+    exporters = cast("dict[str, object]", exporter["exporters"])
+    tapo = cast("dict[str, object]", exporters["tapo"])
+    devices = cast("list[str]", tapo["devices"])
+    options = cast("dict[str, object]", tapo["prometheus_options"])
+    prometheus = cast("dict[str, object]", configuration["prometheus"])
+    interval = options.get("refresh_interval")
+    mode = "live probing on scrape" if interval is None else f"background polling every {interval}s"
+    _progress(f"Devices: {len(devices)} configured; {mode}.")
+    _progress(
+        f"Prometheus: scrape interval {prometheus['scrape_interval']}; scrape timeout {prometheus['scrape_timeout']}."
+    )
+
+
+def _diagnostic_commands(arguments: argparse.Namespace, directory: Path) -> None:
+    """Print runnable status/log commands retaining checkout and override selection."""
+    command = ["uv", "run", "--locked", "--project", str(directory), "power-monitor", "--directory", str(directory)]
+    for override in arguments.compose_file:
+        command.extend(["--compose-file", str(override)])
+    _progress("Inspect service status and logs:")
+    _progress(f"  {shlex.join([*command, 'status'])}")
+    _progress(f"  {shlex.join([*command, 'logs', '--follow'])}")
+
+
+def _check_prometheus(compose: list[str], directory: Path, *, environment: dict[str, str]) -> int:
     """Validate Prometheus and alert fixtures without starting exporter dependencies.
 
     Returns
@@ -131,23 +255,116 @@ def _check_prometheus(compose: list[str], directory: Path) -> int:
         "--rm",
         "--no-deps",
         "--volume",
-        f"{directory / 'prometheus'}:/etc/prometheus:ro",
+        f"{directory / 'prometheus/tests'}:/etc/prometheus/tests:ro",
         "--entrypoint",
         "promtool",
         "prometheus",
     ]
-    for operation in (
-        ["check", "config", "/etc/prometheus/prometheus.yml"],
-        ["test", "rules", "/etc/prometheus/tests/alerts.test.yml"],
+    for message, operation in (
+        ("Checking Prometheus configuration...", ["check", "config", "/etc/prometheus/prometheus.yml"]),
+        ("Checking alert-rule fixtures...", ["test", "rules", "/etc/prometheus/tests/alerts.test.yml"]),
     ):
-        status = _run([*promtool, *operation], directory)
+        _progress(message)
+        status = _run([*promtool, *operation], directory, environment=environment)
         if status:
             return status
     return 0
 
 
+def _compose_files(paths: list[Path], directory: Path) -> list[str]:
+    """Select the base model followed by explicitly ordered overrides.
+
+    Returns
+    -------
+    list[str]
+        Compose file arguments.
+
+    Raises
+    ------
+    FileNotFoundError
+        If an additional Compose file does not exist.
+    """
+    files = ["-f", "compose.yaml"]
+    for override in paths:
+        path = (directory / override).resolve()
+        if not path.is_file():
+            message = f"Compose override file does not exist: {path}"
+            raise FileNotFoundError(message)
+        files.extend(["-f", str(path)])
+    return files
+
+
+def _lifecycle_arguments(arguments: argparse.Namespace) -> list[str]:
+    """Translate a parsed lifecycle command into a fixed Docker argument list.
+
+    Returns
+    -------
+    list[str]
+        Lifecycle operation and explicit options.
+    """
+    if arguments.command == "logs":
+        extra = ["logs", "--tail", "100"]
+        if arguments.follow:
+            extra.append("--follow")
+        return [*extra, *arguments.services]
+    return {
+        "up": ["up", "-d", "--wait", "--wait-timeout", "120"],
+        "down": ["down"],
+        "reset": ["down", "--volumes", "--remove-orphans"],
+        "status": ["ps"],
+        "pull": ["pull"],
+    }[arguments.command]
+
+
+def _check_or_start(arguments: argparse.Namespace, directory: Path, compose: list[str], files: list[str]) -> int:
+    """Prepare selected settings and report validation or startup progress.
+
+    Returns
+    -------
+    int
+        The first failing command's exit status, or zero on success.
+    """
+    _progress("Resolving environment overrides...")
+    status, overrides = _resolve_overrides(compose, directory)
+    if status:
+        return status
+    _progress(f"Loading configuration: {(directory / arguments.config).resolve()}")
+    configuration = load_configuration(directory, overrides, config_path=arguments.config)
+    active = [name for name, value in overrides.items() if value]
+    if active:
+        _progress(f"Environment overrides: {', '.join(active)}.")
+    _configuration_summary(configuration)
+    _progress("Rendering service configuration...")
+    runtime = render_configuration(directory, configuration)
+    # Derived storage follows base defaults; explicit Compose overrides remain last.
+    files[2:2] = ["-f", str(runtime / "compose.storage.yaml")]
+    environment = os.environ | compose_environment(configuration, runtime)
+    compose.extend(files)
+    _progress("Validating Compose configuration...")
+    status = _validate_configuration(compose, directory, environment=environment)
+    if status:
+        return status
+    if arguments.command == "check":
+        status = _check_prometheus(compose, directory, environment=environment)
+        if not status:
+            _progress("Configuration checks passed.")
+        return status
+    _progress("Starting services and waiting for health checks (up to 120s)...")
+    status = _run([*compose, *_lifecycle_arguments(arguments)], directory, environment=environment)
+    if status:
+        sys.stderr.write(f"Stack startup failed (exit status {status}).\n")
+        _diagnostic_commands(arguments, directory)
+        return status
+    _progress("Services passed Compose health checks.")
+    report_startup(compose, directory, environment=environment)
+    _progress("Grafana: sign in with your existing account or the initial credentials configured in .env.")
+    _progress("Device readings: check the dashboard after the first Prometheus scrape.")
+    _diagnostic_commands(arguments, directory)
+    return 0
+
+
 def _compose(arguments: argparse.Namespace, directory: Path) -> int:
-    """Run the selected lifecycle command against this checkout's stack.
+    """Resolve settings and run a lifecycle command against this checkout.
 
     Returns
     -------
@@ -157,7 +374,7 @@ def _compose(arguments: argparse.Namespace, directory: Path) -> int:
     Raises
     ------
     FileNotFoundError
-        If Docker is unavailable or the local environment file has not been created.
+        If Docker, an override file, or required local credentials file is unavailable.
     """
     docker = shutil.which("docker")
     if docker is None:
@@ -167,7 +384,7 @@ def _compose(arguments: argparse.Namespace, directory: Path) -> int:
     creates_containers = command in {"check", "up"}
     env_file = directory / ".env"
     if creates_containers and not env_file.is_file():
-        message = "Missing .env; run 'uv run power-monitor init' and configure your devices first."
+        message = "Missing .env; run 'uv run power-monitor init' and configure credentials first."
         raise FileNotFoundError(message)
     compose = [
         docker,
@@ -176,34 +393,21 @@ def _compose(arguments: argparse.Namespace, directory: Path) -> int:
         str(directory),
         "--env-file",
         str(env_file) if env_file.is_file() else os.devnull,
-        "-f",
-        "compose.yaml",
     ]
-    environment = None
+    files = _compose_files(arguments.compose_file, directory)
     if creates_containers:
-        status = _validate_configuration(compose, directory)
-        if status:
-            return status
-    else:
-        # These commands cannot start containers. Override required values only in the
-        # subprocess, retaining the environment file and COMPOSE_PROJECT_NAME resolution.
-        placeholder = "unused-for-management"
-        environment = os.environ | {"TAPO_PLUG_DEVICES": "127.0.0.1", "GRAFANA_ADMIN_PASSWORD": placeholder}
-    if command == "check":
-        return _check_prometheus(compose, directory)
-    if command == "logs":
-        extra = ["logs", "--tail", "100"]
-        if arguments.follow:
-            extra.append("--follow")
-        extra.extend(arguments.services)
-    else:
-        extra = {
-            "up": ["up", "-d", "--wait", "--wait-timeout", "120"],
-            "down": ["down"],
-            "status": ["ps"],
-            "pull": ["pull"],
-        }[command]
-    return _run([*compose, *extra], directory, environment=environment)
+        return _check_or_start(arguments, directory, compose, files)
+    # Recovery commands need only project identity, even if YAML or local credentials are missing.
+    # These placeholders stay in the child environment and cannot create containers.
+    environment = os.environ | {
+        "TAPO_PLUG_DEVICES": "127.0.0.1",
+        "GRAFANA_ADMIN_PASSWORD": secrets.token_urlsafe(32),
+        "GRAFANA_BIND_ADDRESS": "127.0.0.1",
+        "GRAFANA_PORT": "3000",
+        "PYPROM_RUNTIME_DIR": str(directory / ".runtime" / "unconfigured"),
+    }
+    compose.extend(files)
+    return _run([*compose, *_lifecycle_arguments(arguments)], directory, environment=environment)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -231,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
             _initialize(directory)
             return 0
         return _compose(arguments, directory)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, TypeError) as error:
         sys.stderr.write(f"{error}\n")
         return 1
     except KeyboardInterrupt:

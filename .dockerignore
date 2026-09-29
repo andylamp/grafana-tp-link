@@ -1,1 +1,10 @@
 *
+.env*
+scratch*
+dist/*
+.pytest_cache/*
+.ruff_cache/*
+.github/*
+assets/*
+# Local configuration profiles, audit notes and scratch files.
+scratch/

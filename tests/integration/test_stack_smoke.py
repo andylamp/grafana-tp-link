@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.parse
 from typing import TYPE_CHECKING
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests.integration.support import ROOT, http, mapping, wait_for
+from tests.integration.test_stack_configuration import verify_published_image_device_configuration
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -82,8 +84,27 @@ def expressions(value: object) -> Iterator[str]:
             yield from expressions(item)
 
 
-def expand(expression: str, *, host: str = ".*", alias: str = ".*") -> str:
-    """Substitute Grafana variables for a deterministic integration query.
+def selector_pattern(selection: str | tuple[str, ...] | None) -> str:
+    """Escape literal selections for RE2 and then for their enclosing PromQL string.
+
+    Returns
+    -------
+    str
+        Escaped regex matcher contents, with None representing Grafana's custom All value.
+    """
+    if selection is None:
+        return ".*"
+    values = (selection,) if isinstance(selection, str) else selection
+    # Match the RE2 metacharacters, not Python's larger re.escape character set.
+    escaped = [re.sub(r"([*+?()|\.\[\]{}^$\\])", r"\\\1", value) for value in values]
+    pattern = escaped[0] if len(escaped) == 1 else "(" + "|".join(escaped) + ")"
+    return json.dumps(pattern, ensure_ascii=False)[1:-1]
+
+
+def expand(
+    expression: str, *, host: str | tuple[str, ...] | None = None, alias: str | tuple[str, ...] | None = None
+) -> str:
+    """Substitute literal selections with valid PromQL escaping for integration queries.
 
     Returns
     -------
@@ -91,10 +112,10 @@ def expand(expression: str, *, host: str = ".*", alias: str = ".*") -> str:
         PromQL with concrete selector and interval values.
     """
     substitutions = {
-        "${job:regex}": "pyprom-exporters",
-        "${exporter:regex}": "metrics:8090",
-        "${host:regex}": host,
-        "${device:regex}": alias,
+        "${job}": "pyprom-exporters",
+        "${exporter}": "metrics:8090",
+        "${host}": selector_pattern(host),  # ruff: ignore[missing-f-string-syntax] - Grafana placeholder.
+        "${device}": selector_pattern(alias),
         "$__rate_interval": "1m",
         "$__interval": "1s",
         "$__range": "1h",
@@ -132,6 +153,7 @@ def test_stack_provisions_queries_and_preserves_data_across_recreation(stack: St
     grafana = stack.url("grafana", 3000)
     # Execute the fixture scenarios; loading valid alert syntax alone cannot check their behavior.
     stack.compose("run", "--rm", "--no-deps", "promtool", "test", "rules", "/etc/prometheus/tests/alerts.test.yml")
+    verify_published_image_device_configuration(stack)
     config_before = stack.exporter_config.read_bytes()
     assert "--no-write-config" in stack.compose("run", "--rm", "--no-deps", "exporter", "--help")
     metrics = stack.compose(
@@ -140,7 +162,7 @@ def test_stack_provisions_queries_and_preserves_data_across_recreation(stack: St
         "exporter",
         "python",
         "-c",
-        "import urllib.request as r; print(r.urlopen('http://127.0.0.1:8090/metrics', timeout=5).read().decode())",
+        f"import urllib.request as r; print(r.urlopen('http://127.0.0.1:{stack.exporter_port}/metrics',timeout=5).read().decode())",
     )
     assert "tapo_discovered_devices 0.0" in metrics
     assert stack.exporter_config.read_bytes() == config_before
@@ -155,10 +177,13 @@ def test_stack_provisions_queries_and_preserves_data_across_recreation(stack: St
         wait_for(lambda expr=expression: query(prometheus, expand(expr)))
     device_expression = next(expr for expr in all_expressions if expr.startswith("sum((current_consumption{"))
     assert metric_values(query(prometheus, expand(device_expression))) == [350]
-    assert metric_values(query(prometheus, expand(device_expression, host="192[.]0[.]2[.]10"))) == [100]
+    assert metric_values(query(prometheus, expand(device_expression, host="192.0.2.10"))) == [100]
     assert query(prometheus, expand(device_expression, host="does-not-exist")) == []
-    assert metric_values(query(prometheus, expand(device_expression, alias=r"Desk \\(main\\)"))) == [350]
+    assert metric_values(query(prometheus, expand(device_expression, alias="Desk (main)"))) == [350]
     assert query(prometheus, expand(device_expression, alias="does-not-exist")) == []
+    assert metric_values(query(prometheus, expand(device_expression, host=("192.0.2.10", "192.0.2.11")))) == [350]
+    assert query(prometheus, expand(device_expression, host="192.0.2.1.")) == []
+    assert query(prometheus, expand(device_expression, alias="Desk .*")) == []
     verify_failure_visibility(stack, prometheus, device_expression)
     verify_persistence(stack, prometheus, grafana)
 
