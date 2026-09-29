@@ -65,6 +65,10 @@ Edit `.env` for credentials:
 - Keep or change the generated `GRAFANA_ADMIN_PASSWORD`. Read it locally from `.env` when signing in.
   Single-quote values containing `$` or `#` so Compose treats those characters literally.
 
+If you already have an exporter-only `.env`, also add a nonempty `GRAFANA_ADMIN_PASSWORD` for the stack.
+`init` preserves existing files and does not fill in missing credentials. Both `check` and `up` require this value;
+an empty `GRAFANA_ADMIN_PASSWORD` in your shell overrides a value in `.env`, so unset an unintended shell override.
+
 Then validate and start the stack:
 
 ```sh

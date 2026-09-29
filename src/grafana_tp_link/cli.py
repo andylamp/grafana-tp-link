@@ -24,6 +24,7 @@ from grafana_tp_link.configuration import (
 )
 
 SERVICES = ("exporter", "prometheus", "grafana")
+GRAFANA_BOOTSTRAP_LABEL = "power-monitor.grafana-password-configured"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -128,7 +129,7 @@ def _resolve_overrides(compose: list[str], directory: Path) -> tuple[int, dict[s
     Raises
     ------
     ValueError
-        If Compose returns an unexpected configuration structure.
+        If Compose returns an unexpected configuration structure or the Grafana password is absent.
     """
     probe = {
         "name": "power-monitor-settings",
@@ -136,6 +137,8 @@ def _resolve_overrides(compose: list[str], directory: Path) -> tuple[int, dict[s
             "settings": {
                 "image": "scratch",
                 "environment": {name: "${" + name + ":-}" for name in OVERRIDE_NAMES},
+                # Resolve presence only, never the credential value, using Compose's dotenv precedence.
+                "labels": {GRAFANA_BOOTSTRAP_LABEL: "${GRAFANA_ADMIN_PASSWORD:+configured}"},
             }
         },
     }
@@ -156,7 +159,9 @@ def _resolve_overrides(compose: list[str], directory: Path) -> tuple[int, dict[s
         )
         return result.returncode, {}
     try:
-        environment = json.loads(result.stdout)["services"]["settings"]["environment"]
+        settings = json.loads(result.stdout)["services"]["settings"]
+        environment = settings["environment"]
+        password_status = settings["labels"][GRAFANA_BOOTSTRAP_LABEL]
     except (json.JSONDecodeError, KeyError, TypeError) as error:
         message = "Compose did not return the expected settings environment configuration."
         raise ValueError(message) from error
@@ -164,6 +169,15 @@ def _resolve_overrides(compose: list[str], directory: Path) -> tuple[int, dict[s
         environment.get(name) is not None and not isinstance(environment[name], str) for name in OVERRIDE_NAMES
     ):
         message = "Compose did not return the expected settings environment configuration."
+        raise ValueError(message)
+    if not isinstance(password_status, str) or password_status not in {"", "configured"}:
+        message = "Compose did not return the expected Grafana password presence marker."
+        raise ValueError(message)
+    if not password_status:
+        message = (
+            "GRAFANA_ADMIN_PASSWORD is missing or empty. Set it in the checkout's .env or shell environment. "
+            "An empty shell value overrides .env. Existing .env was preserved."
+        )
         raise ValueError(message)
     return 0, {name: environment.get(name) or "" for name in OVERRIDE_NAMES}
 

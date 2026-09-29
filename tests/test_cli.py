@@ -10,12 +10,16 @@ import shutil
 import stat
 import subprocess  # nosec B404 # ruff: ignore[suspicious-subprocess-import]
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
 import yaml
 
 from grafana_tp_link import cli
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -71,6 +75,26 @@ def test_initialization_does_not_follow_existing_symlink(checkout: Path, tmp_pat
     assert destination.read_text(encoding="utf-8") == "keep these settings\n"
 
 
+def _probe_response(environment: Mapping[str, str | None]) -> str:
+    """Build a successful settings probe without including any credential value.
+
+    Returns
+    -------
+    str
+        JSON model with noncredential overrides and a configured-password marker.
+    """
+    return json.dumps(
+        {
+            "services": {
+                "settings": {
+                    "environment": dict(environment),
+                    "labels": {cli.GRAFANA_BOOTSTRAP_LABEL: "configured"},
+                }
+            }
+        }
+    )
+
+
 @pytest.fixture
 def resolved_configuration(monkeypatch: pytest.MonkeyPatch) -> Mock:
     """Return a valid Compose response without accessing Docker.
@@ -80,8 +104,8 @@ def resolved_configuration(monkeypatch: pytest.MonkeyPatch) -> Mock:
     Mock
         Captured subprocess runner providing resolved JSON configuration.
     """
-    model = {"services": {"settings": {"environment": {"TAPO_PLUG_DEVICES": "192.0.2.1"}}}}
-    runner = Mock(return_value=subprocess.CompletedProcess([], 0, json.dumps(model), ""))
+    response = _probe_response({"TAPO_PLUG_DEVICES": "192.0.2.1"})
+    runner = Mock(return_value=subprocess.CompletedProcess([], 0, response, ""))
     monkeypatch.setattr(cli.subprocess, "run", runner)
     return runner
 
@@ -131,6 +155,54 @@ def test_invalid_compose_stops_before_promtool(
     output = capsys.readouterr()
     assert "exit status 7" in output.err
     assert private_marker not in output.out + output.err
+
+
+@pytest.mark.parametrize("command", ["check", "up"])
+def test_missing_grafana_password_stops_before_rendering_or_containers(
+    checkout: Path,
+    command_runner: Mock,
+    resolved_configuration: Mock,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    """Absent or empty effective passwords fail with a safe remedy and preserve user files."""
+    env_file = checkout / ".env"
+    original = env_file.read_bytes()
+    private_marker = "PRIVATE_CREDENTIAL_VALUE"
+    model = json.loads(_probe_response({"TAPO_PLUG_DEVICES": "192.0.2.1", "TP_LINK_PASSWORD": private_marker}))
+    model["services"]["settings"]["labels"][cli.GRAFANA_BOOTSTRAP_LABEL] = ""
+    resolved_configuration.return_value.stdout = json.dumps(model)
+    assert cli.main(["--directory", str(checkout), command]) == 1
+    command_runner.assert_not_called()
+    resolved_configuration.assert_called_once()
+    assert not (checkout / ".runtime").exists()
+    assert env_file.read_bytes() == original
+    output = capsys.readouterr()
+    assert "GRAFANA_ADMIN_PASSWORD is missing or empty" in output.err
+    assert "empty shell value overrides .env" in output.err
+    assert "Existing .env was preserved" in output.err
+    assert private_marker not in output.out + output.err
+
+
+@pytest.mark.parametrize("marker", [None, False, [], {}, "PRIVATE_INVALID_MARKER"])
+def test_invalid_grafana_password_marker_is_not_reported_as_a_missing_password(
+    checkout: Path,
+    command_runner: Mock,
+    resolved_configuration: Mock,
+    capsys: pytest.CaptureFixture[str],
+    marker: object,
+) -> None:
+    """Malformed probe output fails privately without giving a misleading credential remedy."""
+    model = json.loads(_probe_response({"TAPO_PLUG_DEVICES": "192.0.2.1"}))
+    model["services"]["settings"]["labels"][cli.GRAFANA_BOOTSTRAP_LABEL] = marker
+    resolved_configuration.return_value.stdout = json.dumps(model)
+    assert cli.main(["--directory", str(checkout), "check"]) == 1
+    command_runner.assert_not_called()
+    assert not (checkout / ".runtime").exists()
+    output = capsys.readouterr()
+    assert "expected Grafana password presence marker" in output.err
+    assert "missing or empty" not in output.err
+    assert "PRIVATE_INVALID_MARKER" not in output.out + output.err
 
 
 def test_check_validates_prometheus_without_starting_exporter(checkout: Path, command_runner: Mock) -> None:
@@ -255,10 +327,9 @@ def test_empty_resolved_device_list_cannot_launch_containers(
 ) -> None:
     """Validation uses Compose's resolved environment and rejects empty token lists."""
     private_marker = "DO_NOT_PRINT_RESOLVED_VALUES"
-    model = {
-        "services": {"settings": {"environment": {"TAPO_PLUG_DEVICES": devices, "TP_LINK_PASSWORD": private_marker}}}
-    }
-    resolved_configuration.return_value.stdout = json.dumps(model)
+    resolved_configuration.return_value.stdout = _probe_response(
+        {"TAPO_PLUG_DEVICES": devices, "TP_LINK_PASSWORD": private_marker}
+    )
     for command in ("check", "up"):
         assert cli.main(["--directory", str(checkout), command]) == 1
         command_runner.assert_not_called()
@@ -374,7 +445,7 @@ def test_yaml_devices_allow_startup_and_preserve_comments(
     )
     config.write_text(content, encoding="utf-8")
     environment = {} if override is None else {"TAPO_PLUG_DEVICES": override}
-    resolved_configuration.return_value.stdout = json.dumps({"services": {"settings": {"environment": environment}}})
+    resolved_configuration.return_value.stdout = _probe_response(environment)
     for command in ("check", "up"):
         assert cli.main(["--directory", str(checkout), command]) == 0
     assert command_runner.call_count == 3
@@ -393,9 +464,7 @@ def test_invalid_environment_override_does_not_fall_back_to_yaml(
     config.write_text(
         config.read_text(encoding="utf-8").replace("devices: []", "devices: [192.0.2.10]"), encoding="utf-8"
     )
-    resolved_configuration.return_value.stdout = json.dumps(
-        {"services": {"settings": {"environment": {"TAPO_PLUG_DEVICES": override}}}}
-    )
+    resolved_configuration.return_value.stdout = _probe_response({"TAPO_PLUG_DEVICES": override})
     assert cli.main(["--directory", str(checkout), "up"]) == 1
     command_runner.assert_not_called()
 
@@ -511,7 +580,7 @@ def test_up_renders_yaml_and_forwards_effective_values_without_changing_source(
     model["prometheus"]["scrape_interval"] = "45s"
     content = "# Preserve this user comment.\n" + yaml.safe_dump(model)
     config.write_text(content, encoding="utf-8")
-    resolved_configuration.return_value.stdout = json.dumps({"services": {"settings": {"environment": {}}}})
+    resolved_configuration.return_value.stdout = _probe_response({})
     assert cli.main(["--directory", str(checkout), "up"]) == 0
     environment = command_runner.call_args.kwargs["environment"]
     assert environment["GRAFANA_PORT"] == "4321"
@@ -537,7 +606,7 @@ def test_resolved_environment_overrides_yaml_without_logging_values(
 ) -> None:
     """Resolved overrides change generated settings and report names without exposing their values."""
     overrides = {"TAPO_PLUG_DEVICES": "private-device.example", "GRAFANA_PORT": "4555", "PROMETHEUS_PORT": "8199"}
-    resolved_configuration.return_value.stdout = json.dumps({"services": {"settings": {"environment": overrides}}})
+    resolved_configuration.return_value.stdout = _probe_response(overrides)
     assert cli.main(["--directory", str(checkout), "up"]) == 0
     environment = command_runner.call_args.kwargs["environment"]
     assert environment["GRAFANA_PORT"] == "4555"
@@ -598,7 +667,7 @@ def test_selected_stack_path_uses_checkout_templates_and_preserves_both_sources(
     content = "# Preserve alternate device notes.\n" + yaml.safe_dump(model)
     selected.write_text(content, encoding="utf-8")
     argument = str(selected.relative_to(checkout)) if path_kind == "relative" else str(selected)
-    resolved_configuration.return_value.stdout = json.dumps({"services": {"settings": {"environment": {}}}})
+    resolved_configuration.return_value.stdout = _probe_response({})
     assert cli.main(["--directory", str(checkout), "--config", argument, command]) == 0
     environment = command_runner.call_args.kwargs["environment"]
     assert environment["GRAFANA_PORT"] == "4321"
@@ -635,7 +704,7 @@ def test_resolved_environment_still_overrides_explicit_stack_file(
     content = "# Preserve selected settings.\n" + yaml.safe_dump(model)
     selected.write_text(content, encoding="utf-8")
     overrides = {"GRAFANA_PORT": "4555", "PROMETHEUS_PORT": "18190", "TAPO_PLUG_DEVICES": "192.0.2.81"}
-    resolved_configuration.return_value.stdout = json.dumps({"services": {"settings": {"environment": overrides}}})
+    resolved_configuration.return_value.stdout = _probe_response(overrides)
     assert cli.main(["--directory", str(checkout), "--config", str(selected), "up"]) == 0
     environment = command_runner.call_args.kwargs["environment"]
     assert all(environment[key] == value for key, value in overrides.items())
