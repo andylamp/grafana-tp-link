@@ -88,6 +88,16 @@ It does not start the exporter or probe plugs.
 `up` waits for container health checks; those checks establish service readiness,
 not that every configured plug has produced a reading.
 
+Both commands show progress through configuration loading and validation, along with the effective device count,
+live/polling mode, and Prometheus scrape interval and timeout. `check` also identifies each Prometheus validation step.
+After a successful `up`, the utility reports service health, Grafana's home/dashboard URLs, and commands for status/logs.
+URLs use Docker's actual published ports, including ports changed or assigned dynamically through Compose overrides.
+Prometheus and exporter links appear when their HTTP ports are published; otherwise they are identified as internal
+services. The default stack publishes only Grafana. With a remote Docker context, these addresses belong to the Docker
+host; use that host or an SSH tunnel to reach them.
+Startup failures retain Docker's exit status and print diagnostic commands instead of a success summary.
+Credentials are not included in the progress messages or summary.
+
 ## Operating the stack
 
 Run commands from this checkout. From another directory, specify both the uv project and stack location:

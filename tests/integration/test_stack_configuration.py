@@ -136,10 +136,16 @@ def cli(
     command: str,
     *arguments: str,
     config: Path | None = None,
-) -> None:
-    """Run the installed CLI against the disposable checkout and selected project."""
+) -> str:
+    """Run the installed CLI against the disposable checkout and selected project.
+
+    Returns
+    -------
+    str
+        Combined process output, including startup diagnostics.
+    """
     selection = ["--config", str(config)] if config is not None else []
-    run(
+    return run(
         [
             str(Path(sys.executable).with_name("power-monitor")),
             "--directory",
@@ -316,12 +322,34 @@ def exporter_target_is_healthy(origin: str, port: int) -> bool:
     )
 
 
+def verify_startup_output(instance: Stack, output: str) -> None:
+    """Check progress and actual published URLs without exposing fixture credentials."""
+    progress = (
+        "Resolving environment overrides...",
+        f"Loading configuration: {instance.directory / 'config/stack.yaml'}",
+        "Rendering service configuration...",
+        "Validating Compose configuration...",
+        "Starting services and waiting for health checks (up to 120s)...",
+        "Services passed Compose health checks.",
+    )
+    positions = [output.index(message) for message in progress]
+    assert positions == sorted(positions)
+    grafana = instance.url("grafana", 3000)
+    prometheus = instance.url("prometheus", 9090)
+    assert f"{grafana}/d/tp-link-power/" in output
+    assert f"{prometheus}/targets" in output
+    for service in ("Grafana", "Prometheus", "Exporter"):
+        assert f"{service}: running, healthy" in output
+    assert TEST_PASSWORD not in output
+    assert "fixture-login-only" not in output
+
+
 def test_up_recreates_containers_after_yaml_settings_change(tmp_path: Path) -> None:
     """A second up loads a new runtime digest and effective exporter settings."""
     instance, environment = prepare_cli_stack(tmp_path)
     env_content = write_environment(tmp_path)
     try:
-        cli(instance, environment, "up")
+        verify_startup_output(instance, cli(instance, environment, "up"))
         original_container = instance.compose("ps", "--quiet", "exporter").strip()
         original_runtime = runtime_mount(instance)
         verify_rendered_configuration(original_runtime, port=18090, level="WARNING")
@@ -335,7 +363,7 @@ def test_up_recreates_containers_after_yaml_settings_change(tmp_path: Path) -> N
         mapping(config["prometheus"])["scrape_interval"] = "45s"
         config_file.write_text(yaml.safe_dump(config, sort_keys=False))
         changed = config_file.read_bytes()
-        cli(instance, environment, "up")
+        verify_startup_output(instance, cli(instance, environment, "up"))
         assert instance.compose("ps", "--quiet", "exporter").strip() != original_container
         current_runtime = runtime_mount(instance)
         assert current_runtime != original_runtime

@@ -8,11 +8,13 @@ import argparse
 import json
 import os
 import secrets
+import shlex
 import shutil
 import subprocess  # nosec B404 # ruff: ignore[suspicious-subprocess-import]
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 
 import yaml
 
@@ -22,6 +24,7 @@ from grafana_tp_link.configuration import (
     load_configuration,
     render_configuration,
 )
+from grafana_tp_link.status_output import report_startup
 
 SERVICES = ("exporter", "prometheus", "grafana")
 GRAFANA_BOOTSTRAP_LABEL = "power-monitor.grafana-password-configured"
@@ -206,6 +209,38 @@ def _validate_configuration(compose: list[str], directory: Path, *, environment:
     return result.returncode
 
 
+def _progress(message: str) -> None:
+    """Flush progress before subprocess output, including when stdout is redirected."""
+    sys.stdout.write(f"{message}\n")
+    sys.stdout.flush()
+
+
+def _configuration_summary(configuration: dict[str, object]) -> None:
+    """Describe effective collection settings without listing devices or credentials."""
+    exporter = cast("dict[str, object]", configuration["exporter"])
+    exporters = cast("dict[str, object]", exporter["exporters"])
+    tapo = cast("dict[str, object]", exporters["tapo"])
+    devices = cast("list[str]", tapo["devices"])
+    options = cast("dict[str, object]", tapo["prometheus_options"])
+    prometheus = cast("dict[str, object]", configuration["prometheus"])
+    interval = options.get("refresh_interval")
+    mode = "live probing on scrape" if interval is None else f"background polling every {interval}s"
+    _progress(f"Devices: {len(devices)} configured; {mode}.")
+    _progress(
+        f"Prometheus: scrape interval {prometheus['scrape_interval']}; scrape timeout {prometheus['scrape_timeout']}."
+    )
+
+
+def _diagnostic_commands(arguments: argparse.Namespace, directory: Path) -> None:
+    """Print runnable status/log commands retaining checkout and override selection."""
+    command = ["uv", "run", "--locked", "--project", str(directory), "power-monitor", "--directory", str(directory)]
+    for override in arguments.compose_file:
+        command.extend(["--compose-file", str(override)])
+    _progress("Inspect service status and logs:")
+    _progress(f"  {shlex.join([*command, 'status'])}")
+    _progress(f"  {shlex.join([*command, 'logs', '--follow'])}")
+
+
 def _check_prometheus(compose: list[str], directory: Path, *, environment: dict[str, str]) -> int:
     """Validate Prometheus and alert fixtures without starting exporter dependencies.
 
@@ -225,10 +260,11 @@ def _check_prometheus(compose: list[str], directory: Path, *, environment: dict[
         "promtool",
         "prometheus",
     ]
-    for operation in (
-        ["check", "config", "/etc/prometheus/prometheus.yml"],
-        ["test", "rules", "/etc/prometheus/tests/alerts.test.yml"],
+    for message, operation in (
+        ("Checking Prometheus configuration...", ["check", "config", "/etc/prometheus/prometheus.yml"]),
+        ("Checking alert-rule fixtures...", ["test", "rules", "/etc/prometheus/tests/alerts.test.yml"]),
     ):
+        _progress(message)
         status = _run([*promtool, *operation], directory, environment=environment)
         if status:
             return status
@@ -280,6 +316,53 @@ def _lifecycle_arguments(arguments: argparse.Namespace) -> list[str]:
     }[arguments.command]
 
 
+def _check_or_start(arguments: argparse.Namespace, directory: Path, compose: list[str], files: list[str]) -> int:
+    """Prepare selected settings and report validation or startup progress.
+
+    Returns
+    -------
+    int
+        The first failing command's exit status, or zero on success.
+    """
+    _progress("Resolving environment overrides...")
+    status, overrides = _resolve_overrides(compose, directory)
+    if status:
+        return status
+    _progress(f"Loading configuration: {(directory / arguments.config).resolve()}")
+    configuration = load_configuration(directory, overrides, config_path=arguments.config)
+    active = [name for name, value in overrides.items() if value]
+    if active:
+        _progress(f"Environment overrides: {', '.join(active)}.")
+    _configuration_summary(configuration)
+    _progress("Rendering service configuration...")
+    runtime = render_configuration(directory, configuration)
+    # Derived storage follows base defaults; explicit Compose overrides remain last.
+    files[2:2] = ["-f", str(runtime / "compose.storage.yaml")]
+    environment = os.environ | compose_environment(configuration, runtime)
+    compose.extend(files)
+    _progress("Validating Compose configuration...")
+    status = _validate_configuration(compose, directory, environment=environment)
+    if status:
+        return status
+    if arguments.command == "check":
+        status = _check_prometheus(compose, directory, environment=environment)
+        if not status:
+            _progress("Configuration checks passed.")
+        return status
+    _progress("Starting services and waiting for health checks (up to 120s)...")
+    status = _run([*compose, *_lifecycle_arguments(arguments)], directory, environment=environment)
+    if status:
+        sys.stderr.write(f"Stack startup failed (exit status {status}).\n")
+        _diagnostic_commands(arguments, directory)
+        return status
+    _progress("Services passed Compose health checks.")
+    report_startup(compose, directory, environment=environment)
+    _progress("Grafana: sign in with your existing account or the initial credentials configured in .env.")
+    _progress("Device readings: check the dashboard after the first Prometheus scrape.")
+    _diagnostic_commands(arguments, directory)
+    return 0
+
+
 def _compose(arguments: argparse.Namespace, directory: Path) -> int:
     """Resolve settings and run a lifecycle command against this checkout.
 
@@ -313,34 +396,17 @@ def _compose(arguments: argparse.Namespace, directory: Path) -> int:
     ]
     files = _compose_files(arguments.compose_file, directory)
     if creates_containers:
-        status, overrides = _resolve_overrides(compose, directory)
-        if status:
-            return status
-        configuration = load_configuration(directory, overrides, config_path=arguments.config)
-        runtime = render_configuration(directory, configuration)
-        # Derived storage follows base defaults; explicit Compose overrides remain last.
-        files[2:2] = ["-f", str(runtime / "compose.storage.yaml")]
-        environment = os.environ | compose_environment(configuration, runtime)
-        active = [name for name, value in overrides.items() if value]
-        if active:
-            sys.stdout.write(f"Environment overrides: {', '.join(active)}.\n")
-    else:
-        # Recovery commands need only project identity, even if YAML or local credentials are missing.
-        # These placeholders stay in the child environment and cannot create containers.
-        environment = os.environ | {
-            "TAPO_PLUG_DEVICES": "127.0.0.1",
-            "GRAFANA_ADMIN_PASSWORD": secrets.token_urlsafe(32),
-            "GRAFANA_BIND_ADDRESS": "127.0.0.1",
-            "GRAFANA_PORT": "3000",
-            "PYPROM_RUNTIME_DIR": str(directory / ".runtime" / "unconfigured"),
-        }
+        return _check_or_start(arguments, directory, compose, files)
+    # Recovery commands need only project identity, even if YAML or local credentials are missing.
+    # These placeholders stay in the child environment and cannot create containers.
+    environment = os.environ | {
+        "TAPO_PLUG_DEVICES": "127.0.0.1",
+        "GRAFANA_ADMIN_PASSWORD": secrets.token_urlsafe(32),
+        "GRAFANA_BIND_ADDRESS": "127.0.0.1",
+        "GRAFANA_PORT": "3000",
+        "PYPROM_RUNTIME_DIR": str(directory / ".runtime" / "unconfigured"),
+    }
     compose.extend(files)
-    if creates_containers:
-        status = _validate_configuration(compose, directory, environment=environment)
-        if status:
-            return status
-    if command == "check":
-        return _check_prometheus(compose, directory, environment=environment)
     return _run([*compose, *_lifecycle_arguments(arguments)], directory, environment=environment)
 
 

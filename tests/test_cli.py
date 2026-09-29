@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess  # nosec B404 # ruff: ignore[suspicious-subprocess-import]
@@ -124,6 +125,7 @@ def command_runner(checkout: Path, monkeypatch: pytest.MonkeyPatch, resolved_con
     monkeypatch.setattr(cli.shutil, "which", lambda _name: "/usr/bin/docker")
     runner = Mock(return_value=0)
     monkeypatch.setattr(cli, "_run", runner)
+    monkeypatch.setattr(cli, "report_startup", Mock())
     return runner
 
 
@@ -767,3 +769,93 @@ def test_recovery_ignores_missing_selected_config_and_credentials(
     resolved_configuration.assert_not_called()
     assert not (checkout / ".runtime").exists()
     assert not (checkout / ".env").exists()
+
+
+def test_up_reports_progress_before_starting_and_summarizes_only_after_health_checks(
+    checkout: Path,
+    command_runner: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Effective collection settings precede Docker output; URLs follow successful startup."""
+    config = checkout / "config" / "stack.yaml"
+    model = yaml.safe_load(config.read_text(encoding="utf-8"))
+    model["exporter"]["exporters"]["tapo"]["prometheus_options"]["refresh_interval"] = 60
+    config.write_text(yaml.safe_dump(model), encoding="utf-8")
+    private_marker = "PRIVATE_GRAFANA_PASSWORD"
+    monkeypatch.setenv("GRAFANA_ADMIN_PASSWORD", private_marker)
+    output_before_start = []
+
+    def start(*_args: object, **_kwargs: object) -> int:
+        output_before_start.append(capsys.readouterr().out)
+        return 0
+
+    command_runner.side_effect = start
+    summary = Mock()
+    monkeypatch.setattr(cli, "report_startup", summary)
+    assert cli.main(["--directory", str(checkout), "up"]) == 0
+    assert len(output_before_start) == 1
+    before = output_before_start[0]
+    assert "Devices: 1 configured; background polling every 60s." in before
+    assert "Prometheus: scrape interval 30s; scrape timeout 25s." in before
+    assert before.index("Loading configuration:") < before.index("Rendering service configuration...")
+    assert before.index("Validating Compose configuration...") < before.index("Starting services")
+    assert "Services passed Compose health checks." not in before
+    summary.assert_called_once_with(
+        command_runner.call_args.args[0][:-5], checkout, environment=command_runner.call_args.kwargs["environment"]
+    )
+    after = capsys.readouterr()
+    assert "Services passed Compose health checks." in after.out
+    assert "power-monitor" in after.out
+    assert "logs --follow" in after.out
+    assert private_marker not in before + after.out + after.err
+
+
+@pytest.mark.parametrize("status", [0, 7])
+def test_check_reports_only_completed_validation_steps(
+    checkout: Path,
+    command_runner: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: int,
+) -> None:
+    """Failed configuration checks never print success or advertise running services."""
+    summary = Mock()
+    monkeypatch.setattr(cli, "report_startup", summary)
+    command_runner.return_value = status
+    assert cli.main(["--directory", str(checkout), "check"]) == status
+    output = capsys.readouterr().out
+    assert "live probing on scrape" in output
+    assert "Checking Prometheus configuration..." in output
+    assert ("Checking alert-rule fixtures..." in output) is (status == 0)
+    assert ("Configuration checks passed." in output) is (status == 0)
+    assert "Services passed Compose health checks." not in output
+    summary.assert_not_called()
+
+
+def test_failed_up_retains_exit_status_and_prints_quoted_diagnostic_commands(
+    checkout: Path,
+    command_runner: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Failed health waits offer commands preserving checkout and ordered override files."""
+    override = checkout / "override with spaces.yaml"
+    override.write_text("services: {}\n", encoding="utf-8")
+    summary = Mock()
+    monkeypatch.setattr(cli, "report_startup", summary)
+    command_runner.return_value = 17
+    assert cli.main(["--directory", str(checkout), "--compose-file", override.name, "up"]) == 17
+    output = capsys.readouterr()
+    assert "Stack startup failed (exit status 17)." in output.err
+    assert "Services passed Compose health checks." not in output.out
+    assert "http://" not in output.out
+    commands = [shlex.split(line) for line in output.out.splitlines() if line.startswith("  uv ")]
+    assert len(commands) == 2
+    for command in commands:
+        assert command[command.index("--project") + 1] == str(checkout)
+        assert command[command.index("--directory") + 1] == str(checkout)
+        assert command[command.index("--compose-file") + 1] == override.name
+    assert commands[0][-1] == "status"
+    assert commands[1][-2:] == ["logs", "--follow"]
+    summary.assert_not_called()
