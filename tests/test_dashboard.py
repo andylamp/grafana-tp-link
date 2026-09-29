@@ -137,7 +137,7 @@ def test_query_selectors_match_exporter_metrics_and_device_labels(dashboard: JSO
                     assert " == 1" in expression
                     if panel["type"] in {"timeseries", "bargauge"} and not expression.startswith("sum("):
                         assert "{{host}}" in target["legendFormat"]
-                        assert "{{instance}}" in target["legendFormat"]
+                        assert "{{alias}}" in target["legendFormat"]
     assert queried_device_metrics == DEVICE_UNITS.keys()
 
 
@@ -188,7 +188,7 @@ def test_health_panels_do_not_invent_device_freshness_or_online_state(dashboard:
 
 def test_device_series_share_identity_and_name_based_colors(dashboard: JSON) -> None:
     """Rank changes, filtering and a single result must not remap a device's color."""
-    device_legend = "{{alias}} · {{host}} [{{instance}}]"
+    device_legend = "{{alias}} · {{host}}"
     matched_panels = set()
     for panel in dashboard["panels"]:
         if panel["type"] not in {"timeseries", "bargauge", "table"}:

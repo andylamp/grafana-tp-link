@@ -354,18 +354,17 @@ Validate and apply any changes using `power-monitor check` and `power-monitor up
 [dash.json](dash.json) is a standalone dashboard that can also be imported into another Grafana installation.
 Choose **Dashboards → New → Import**, upload the file, and select a Prometheus source using the dashboard's
 **Data source** variable. The provisioned source has UID `prometheus`; the dashboard UID is `tp-link-power`.
-Choose the job and exporter filters if your scrape labels differ. The selected job is shown in the filter rather than
-repeated in every legend. If the same exporter appears in multiple jobs, select one job to distinguish those series.
+Choose the job and exporter filters if your scrape labels differ. Source details stay in these filters instead of
+repeating in device labels. Select a single job and exporter when different installations reuse device host addresses.
 
 Compact legends sit below each graph, leaving its full width available for readings. Legend entries flow into multiple
 columns when space permits; Grafana's native legend does not enforce a fixed column count. Panels provide room for a
 twelve-device fleet without internal vertical scrolling. Use the Host and Device filters to focus larger selections.
 Hover a graph to see its device labels and values, or click a legend entry to focus a series.
 
-Every device uses the same identity: **alias · host [exporter]**. The host and exporter distinguish plugs with
-identical aliases or overlapping address spaces. Colors follow this complete name across graphs and ranked readings,
-even when ranking or filters change. Grafana's finite palette can reuse a color, so use the label to identify a device.
-The selected power total is a separate dashed, amber line.
+Every device label uses **alias · host**, without a bracketed suffix. The host distinguishes plugs with identical aliases.
+Colors follow this name across graphs and ranked readings, even when ranking or filters change. Grafana's finite palette
+can reuse a color, so use the label to identify a device. The selected power total is a separate dashed, amber line.
 
 Current-load and Wi-Fi panels retain labels beside each reading, including when only one device is selected. Wi-Fi rows
 put the weakest signal first; values closer to zero are stronger. Their colors identify devices, matching the graphs,
