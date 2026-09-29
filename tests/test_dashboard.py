@@ -188,7 +188,7 @@ def test_health_panels_do_not_invent_device_freshness_or_online_state(dashboard:
 
 def test_device_series_share_identity_and_name_based_colors(dashboard: JSON) -> None:
     """Rank changes, filtering and a single result must not remap a device's color."""
-    device_legend = "{{alias}} · {{host}} [{{job}} / {{instance}}]"
+    device_legend = "{{alias}} · {{host}} [{{instance}}]"
     matched_panels = set()
     for panel in dashboard["panels"]:
         if panel["type"] not in {"timeseries", "bargauge", "table"}:
@@ -216,7 +216,7 @@ def test_device_series_share_identity_and_name_based_colors(dashboard: JSON) -> 
 
 @pytest.mark.parametrize("panel_id", [11, 20])
 def test_current_device_panels_preserve_readable_names_and_colors(dashboard: JSON, panel_id: int) -> None:
-    """Show identity even for a singleton result and keep many bars readable by scrolling."""
+    """Show singleton identity and keep compact rows readable for a larger device list."""
     panel = next(panel for panel in dashboard["panels"] if panel["id"] == panel_id)
     assert panel["type"] == "bargauge"
     assert panel["fieldConfig"]["defaults"]["displayName"] == "${__field.name}"
@@ -232,7 +232,7 @@ def test_current_device_panels_preserve_readable_names_and_colors(dashboard: JSO
     assert options["orientation"] == "horizontal"
     assert options["namePlacement"] == "top"
     assert options["sizing"] == "manual"
-    assert options["minVizHeight"] >= 48
+    assert options["minVizHeight"] >= 32
     assert options["displayMode"] == "basic"
     assert options["valueMode"] == "text"
 
@@ -272,12 +272,12 @@ def test_current_wifi_ranks_weakest_first_without_replacing_device_colors(dashbo
     assert defaults["color"]["mode"] == "palette-classic-by-name"
 
 
-def test_exporter_trends_keep_job_identity_and_stable_colors(dashboard: JSON) -> None:
-    """Different jobs sharing an instance label must have distinct stable legend names."""
+def test_exporter_trends_keep_instance_identity_and_stable_colors(dashboard: JSON) -> None:
+    """Use compact exporter identities with a consistent color across diagnostic graphs."""
     panels = [panel for panel in dashboard["panels"] if panel["id"] in {28, 29}]
     assert len(panels) == 2
     for panel in panels:
         assert panel["fieldConfig"]["defaults"]["color"]["mode"] == "palette-classic-by-name"
-        assert all(target["legendFormat"] == "{{job}} / {{instance}}" for target in panel["targets"])
+        assert all(target["legendFormat"] == "{{instance}}" for target in panel["targets"])
         assert panel["options"]["legend"]["placement"] == "bottom"
         assert panel["options"]["legend"]["showLegend"] is True

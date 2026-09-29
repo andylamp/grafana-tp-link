@@ -471,7 +471,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Instantaneous watts per device and the sum of available readings. Gaps remain visible; a zero reading is a real reported zero. Host and exporter distinguish repeated aliases. Device colors follow their legend names across panels. The dashed neutral line is the selected total.",
+      "description": "Instantaneous watts per device and the sum of available readings. Gaps remain visible; a zero reading is a real reported zero. Host and exporter distinguish repeated aliases. Device colors follow their legend names across panels. The dashed amber line is the selected total.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -534,7 +534,7 @@
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "text",
+                  "fixedColor": "#BF8427",
                   "mode": "fixed"
                 }
               },
@@ -557,7 +557,7 @@
         ]
       },
       "gridPos": {
-        "h": 14,
+        "h": 18,
         "w": 16,
         "x": 0,
         "y": 9
@@ -586,7 +586,7 @@
           "editorMode": "code",
           "expr": "(current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
           "range": true,
           "refId": "A"
         },
@@ -635,7 +635,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 14,
+        "h": 18,
         "w": 8,
         "x": 16,
         "y": 9
@@ -644,7 +644,7 @@
       "options": {
         "displayMode": "basic",
         "maxVizHeight": 52,
-        "minVizHeight": 52,
+        "minVizHeight": 36,
         "minVizWidth": 0,
         "namePlacement": "top",
         "orientation": "horizontal",
@@ -658,8 +658,8 @@
         "showUnfilled": true,
         "sizing": "manual",
         "text": {
-          "titleSize": 13,
-          "valueSize": 17
+          "titleSize": 12,
+          "valueSize": 16
         },
         "valueMode": "text"
       },
@@ -672,7 +672,7 @@
           "editorMode": "code",
           "expr": "topk(10, (current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
           "range": false,
           "refId": "A"
         }
@@ -712,7 +712,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 27
       },
       "id": 12,
       "panels": [],
@@ -776,10 +776,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 12,
+        "h": 18,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 28
       },
       "id": 13,
       "options": {
@@ -805,7 +805,7 @@
           "editorMode": "code",
           "expr": "(current_consumption_today{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
           "range": true,
           "refId": "A"
         }
@@ -870,10 +870,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 12,
+        "h": 18,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 28
       },
       "id": 14,
       "options": {
@@ -899,7 +899,7 @@
           "editorMode": "code",
           "expr": "(current_month_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
           "range": true,
           "refId": "A"
         }
@@ -914,7 +914,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 46
       },
       "id": 15,
       "panels": [],
@@ -978,10 +978,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 12,
+        "h": 18,
         "w": 12,
         "x": 0,
-        "y": 37
+        "y": 47
       },
       "id": 16,
       "options": {
@@ -1007,7 +1007,7 @@
           "editorMode": "code",
           "expr": "(current_voltage{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
           "range": true,
           "refId": "A"
         }
@@ -1072,10 +1072,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 12,
+        "h": 18,
         "w": 12,
         "x": 12,
-        "y": 37
+        "y": 47
       },
       "id": 17,
       "options": {
@@ -1101,7 +1101,7 @@
           "editorMode": "code",
           "expr": "(current_current{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
           "range": true,
           "refId": "A"
         }
@@ -1116,7 +1116,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 65
       },
       "id": 18,
       "panels": [],
@@ -1179,10 +1179,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 14,
+        "h": 18,
         "w": 12,
         "x": 0,
-        "y": 50
+        "y": 66
       },
       "id": 19,
       "options": {
@@ -1208,7 +1208,7 @@
           "editorMode": "code",
           "expr": "(current_rssi{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
           "range": true,
           "refId": "A"
         }
@@ -1247,16 +1247,16 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 14,
+        "h": 18,
         "w": 12,
         "x": 12,
-        "y": 50
+        "y": 66
       },
       "id": 20,
       "options": {
         "displayMode": "basic",
         "maxVizHeight": 52,
-        "minVizHeight": 52,
+        "minVizHeight": 36,
         "minVizWidth": 0,
         "namePlacement": "top",
         "orientation": "horizontal",
@@ -1270,8 +1270,8 @@
         "showUnfilled": true,
         "sizing": "manual",
         "text": {
-          "titleSize": 13,
-          "valueSize": 17
+          "titleSize": 12,
+          "valueSize": 16
         },
         "valueMode": "text"
       },
@@ -1284,7 +1284,7 @@
           "editorMode": "code",
           "expr": "sort((current_rssi{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{job}} / {{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
           "range": false,
           "refId": "A"
         }
@@ -1324,7 +1324,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 64
+        "y": 84
       },
       "id": 21,
       "panels": [],
@@ -1362,7 +1362,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 65
+        "y": 85
       },
       "id": 22,
       "options": {
@@ -1428,7 +1428,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 65
+        "y": 85
       },
       "id": 23,
       "options": {
@@ -1494,7 +1494,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 65
+        "y": 85
       },
       "id": 24,
       "options": {
@@ -1560,7 +1560,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 65
+        "y": 85
       },
       "id": 25,
       "options": {
@@ -1626,7 +1626,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 65
+        "y": 85
       },
       "id": 26,
       "options": {
@@ -1692,7 +1692,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 65
+        "y": 85
       },
       "id": 27,
       "options": {
@@ -1786,7 +1786,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 69
+        "y": 89
       },
       "id": 28,
       "options": {
@@ -1812,7 +1812,7 @@
           "editorMode": "code",
           "expr": "scrape_duration_seconds{job=~\"${job}\",instance=~\"${exporter}\"}",
           "instant": false,
-          "legendFormat": "{{job}} / {{instance}}",
+          "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -1896,7 +1896,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 69
+        "y": 89
       },
       "id": 29,
       "options": {
@@ -1922,7 +1922,7 @@
           "editorMode": "code",
           "expr": "up{job=~\"${job}\",instance=~\"${exporter}\"}",
           "instant": false,
-          "legendFormat": "{{job}} / {{instance}}",
+          "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -1936,7 +1936,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 79
+        "y": 99
       },
       "id": 30,
       "options": {
@@ -2095,5 +2095,5 @@
   "timezone": "browser",
   "title": "TP-Link \u00b7 Power & Energy",
   "uid": "tp-link-power",
-  "version": 2
+  "version": 3
 }
