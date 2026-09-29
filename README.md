@@ -398,6 +398,16 @@ uv run --locked prek run --all-files
 ```
 
 Pytest runs with up to four workers by default; use `-n 0` for serial debugging.
+
+For VS Code, run `uv sync --locked` and install the [workspace extension recommendations](.vscode/extensions.json).
+The workspace defaults to `.venv`; if you already selected another interpreter, use **Python: Select Interpreter**
+to choose this checkout's environment. Ruff and ty use the environment's tools and the project's configuration;
+Markdown uses the shared markdownlint configuration, and JSON uses VS Code's built-in formatter.
+Normal Test Explorer runs retain parallel execution. **Debug Test** uses the checked-in launch configuration
+with `-n 0` so breakpoints work in one process.
+Editor terminals do not automatically import deployment `.env` values, avoiding stale shell overrides after file edits.
+The CLI still loads `.env`; Python test/debug environment loading remains controlled separately by `python.envFile`.
+
 Docker integration tests are skipped unless explicitly enabled. To run them against the pinned images:
 
 ```sh
