@@ -22,6 +22,14 @@ DEVICE_UNITS = {
     "current_consumption_today": "watth",
     "current_month_consumption": "watth",
 }
+DEVICE_OPERATIONAL_UNITS = {
+    "tapo_device_update_success": "short",
+    "tapo_device_last_success_timestamp_seconds": "s",
+    "tapo_device_update_duration_seconds": "s",
+    "tapo_device_update_failures_total": "ops",
+    "tapo_device_update_timeouts_total": "ops",
+}
+DEVICE_METRICS = DEVICE_UNITS | DEVICE_OPERATIONAL_UNITS
 INFRASTRUCTURE_METRICS = {
     "up",
     "tapo_discovered_devices",
@@ -29,6 +37,9 @@ INFRASTRUCTURE_METRICS = {
     "scrape_samples_scraped",
     "process_resident_memory_bytes",
     "process_cpu_seconds_total",
+    "tapo_refresh_duration_seconds",
+    "tapo_refresh_in_progress",
+    "tapo_scrape_refresh_timeouts_total",
 }
 DATASOURCE = {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
 SELECTOR = re.compile(r'([a-zA-Z_:][a-zA-Z0-9_:]*)\{((?:"(?:[^"\\]|\\.)*"|[^"}])*)\}')
@@ -94,25 +105,37 @@ def test_all_queries_use_the_selected_prometheus_datasource(dashboard: JSON) -> 
     for variable in variables.values():
         if variable["type"] == "query":
             assert variable["datasource"] == DATASOURCE
+            assert ":regex}" not in variable["query"]["query"]
+            assert ":regex}" not in variable["definition"]
     for panel in dashboard["panels"]:
         for target in panel.get("targets", []):
             assert panel["datasource"] == DATASOURCE
             assert target["datasource"] == DATASOURCE
             assert target["expr"].strip()
+            # The generic :regex formatter emits invalid single backslashes in PromQL strings.
+            assert ":regex}" not in target["expr"]
 
 
 def test_device_filters_support_regex_safe_multiple_and_all_selections(dashboard: JSON) -> None:
-    """Dots in hosts and special characters in aliases must not broaden selections."""
+    """Let Prometheus escape both regex syntax and quoted PromQL string literals."""
     variables = {variable["name"]: variable for variable in dashboard["templating"]["list"]}
     for name in ("job", "exporter", "host", "device"):
         variable = variables[name]
         assert variable["multi"] is True
         assert variable["includeAll"] is True
-        assert variable["allValue"] == ".*"
+        assert variable["allValue"] == ("" if name == "job" else ".*")
         assert variable["options"] == []
-    assert "${host:regex}" in variables["device"]["query"]["query"]
+    assert "${host}" in variables["device"]["query"]["query"]
     assert variables["host"]["current"]["value"] == "$__all"
     assert variables["device"]["current"]["value"] == "$__all"
+
+
+def test_all_jobs_expands_only_known_exporter_jobs(dashboard: JSON) -> None:
+    """All must exclude Prometheus itself and unrelated jobs from health/process panels."""
+    job = next(variable for variable in dashboard["templating"]["list"] if variable["name"] == "job")
+    assert job["query"]["query"] == "label_values(tapo_discovered_devices, job)"
+    # A blank custom All value makes Grafana combine the query's actual options.
+    assert not job.get("allValue")
 
 
 def test_query_selectors_match_exporter_metrics_and_device_labels(dashboard: JSON) -> None:
@@ -122,19 +145,19 @@ def test_query_selectors_match_exporter_metrics_and_device_labels(dashboard: JSO
         for target in panel.get("targets", []):
             expression = target["expr"]
             for metric, labels in SELECTOR.findall(expression):
-                assert metric in DEVICE_UNITS or metric in INFRASTRUCTURE_METRICS, metric
-                assert 'job=~"${job:regex}"' in labels
-                assert 'instance=~"${exporter:regex}"' in labels
-                if metric in DEVICE_UNITS:
+                assert metric in DEVICE_METRICS or metric in INFRASTRUCTURE_METRICS, metric
+                assert 'job=~"${job}"' in labels
+                assert 'instance=~"${exporter}"' in labels
+                if metric in DEVICE_METRICS:
                     queried_device_metrics.add(metric)
-                    assert 'host=~"${host:regex}"' in labels
-                    assert 'alias=~"${device:regex}"' in labels
+                    assert 'host=~"${host}"' in labels
+                    assert 'alias=~"${device}"' in labels
                     assert "and on (job, instance)" in expression
                     assert " == 1" in expression
                     if panel["type"] in {"timeseries", "bargauge"} and not expression.startswith("sum("):
                         assert "{{host}}" in target["legendFormat"]
-                        assert "{{instance}}" in target["legendFormat"]
-    assert queried_device_metrics == DEVICE_UNITS.keys()
+                        assert "{{alias}}" in target["legendFormat"]
+    assert queried_device_metrics == DEVICE_METRICS.keys()
 
 
 def test_native_measurements_keep_their_units_and_energy_gauges_are_not_counters(dashboard: JSON) -> None:
@@ -180,3 +203,132 @@ def test_health_panels_do_not_invent_device_freshness_or_online_state(dashboard:
     assert "older snapshot" in guidance
     assert "exporter logs" in guidance
     assert "not counters" in guidance
+
+
+def test_device_series_share_identity_and_name_based_colors(dashboard: JSON) -> None:
+    """Rank changes, filtering and a single result must not remap a device's color."""
+    device_legend = "{{alias}} · {{host}}"
+    matched_panels = set()
+    for panel in dashboard["panels"]:
+        if panel["type"] not in {"timeseries", "bargauge", "table"}:
+            continue
+        device_targets = [
+            target
+            for target in panel.get("targets", [])
+            if not target["expr"].startswith("sum(")
+            and any(metric in DEVICE_METRICS for metric, _labels in SELECTOR.findall(target["expr"]))
+        ]
+        if not device_targets:
+            continue
+        matched_panels.add(panel["id"])
+        assert panel["fieldConfig"]["defaults"]["color"]["mode"] == "palette-classic-by-name"
+        for target in device_targets:
+            assert target["legendFormat"] == device_legend
+        for override in panel["fieldConfig"]["overrides"]:
+            for setting in override["properties"]:
+                if setting["id"] == "color":
+                    # The aggregate has a separate identity; device colors remain automatic.
+                    assert override["matcher"] == {"id": "byName", "options": "Selected total"}
+                    assert setting["value"]["mode"] == "fixed"
+    assert matched_panels
+
+
+@pytest.mark.parametrize("panel_id", [11, 20])
+def test_current_device_panels_preserve_readable_names_and_colors(dashboard: JSON, panel_id: int) -> None:
+    """Show singleton identity and keep compact rows readable for a larger device list."""
+    panel = next(panel for panel in dashboard["panels"] if panel["id"] == panel_id)
+    assert panel["type"] == "bargauge"
+    assert panel["fieldConfig"]["defaults"]["displayName"] == "${__field.name}"
+    transformations = panel["transformations"]
+    assert [transform["id"] for transform in transformations] == ["seriesToRows", "rowsToFields"]
+    fields = transformations[1]["options"]["mappings"]
+    assert {field["fieldName"]: field["handlerKey"] for field in fields} == {
+        "Metric": "field.name",
+        "Value": "field.value",
+        "Time": "__ignore",
+    }
+    options = panel["options"]
+    assert options["orientation"] == "horizontal"
+    assert options["namePlacement"] == "top"
+    assert options["sizing"] == "manual"
+    assert options["minVizHeight"] >= 32
+    assert options["displayMode"] == "basic"
+    assert options["valueMode"] == "text"
+
+
+def test_device_trends_keep_compact_legends_below_plots(dashboard: JSON) -> None:
+    """Wrapped labels below each graph preserve plot width and keep color identity nearby."""
+    for panel in dashboard["panels"]:
+        if panel["type"] != "timeseries":
+            continue
+        if not any(
+            metric in DEVICE_METRICS
+            for target in panel["targets"]
+            for metric, _labels in SELECTOR.findall(target["expr"])
+        ):
+            continue
+        minimum_height = 12 if panel["gridPos"]["w"] == 24 else 18
+        assert panel["gridPos"]["h"] >= minimum_height
+        legend = panel["options"]["legend"]
+        assert legend["placement"] == "bottom"
+        assert legend["displayMode"] == "list"
+        assert legend["calcs"] == []
+        assert legend["showLegend"] is True
+        assert panel["options"]["tooltip"]["mode"] == "multi"
+        assert panel["fieldConfig"]["defaults"]["custom"]["hideFrom"] == {
+            "legend": False,
+            "tooltip": False,
+            "viz": False,
+        }
+
+
+def test_current_wifi_ranks_weakest_first_without_replacing_device_colors(dashboard: JSON) -> None:
+    """Keep RSSI interpretation numerical while preserving the same per-device color."""
+    panel = next(panel for panel in dashboard["panels"] if panel["id"] == 20)
+    assert panel["targets"][0]["expr"].startswith("sort(")
+    defaults = panel["fieldConfig"]["defaults"]
+    assert defaults["unit"] == "dBm"
+    assert defaults["min"] == -100
+    assert defaults["max"] == 0
+    assert defaults["color"]["mode"] == "palette-classic-by-name"
+
+
+def test_exporter_trends_keep_instance_identity_and_stable_colors(dashboard: JSON) -> None:
+    """Use compact exporter identities with a consistent color across diagnostic graphs."""
+    panels = [panel for panel in dashboard["panels"] if panel["id"] in {28, 29, 37, 38, 39}]
+    assert len(panels) == 5
+    for panel in panels:
+        assert panel["fieldConfig"]["defaults"]["color"]["mode"] == "palette-classic-by-name"
+        assert all(target["legendFormat"] == "{{instance}}" for target in panel["targets"])
+        assert panel["options"]["legend"]["placement"] == "bottom"
+        assert panel["options"]["legend"]["showLegend"] is True
+
+
+def test_operational_queries_keep_sdk_age_and_counter_rates_distinct(dashboard: JSON) -> None:
+    """Show absent success timestamps as gaps and rates only for cumulative failures."""
+    panels = {panel["title"]: panel for panel in dashboard["panels"]}
+    age = panels["Time since successful update"]
+    assert "time() - (tapo_device_last_success_timestamp_seconds{" in age["targets"][0]["expr"]
+    assert "> 0)" in age["targets"][0]["expr"]
+    assert "not physical sensor freshness" in age["description"]
+    assert "no successful update timestamp" in age["description"]
+    assert "0.3.0" in panels["When data is missing"]["options"]["content"]
+    for panel in dashboard["panels"]:
+        for target in panel.get("targets", []):
+            for metric, _labels in SELECTOR.findall(target["expr"]):
+                if metric not in DEVICE_OPERATIONAL_UNITS:
+                    continue
+                assert panel["fieldConfig"]["defaults"]["unit"] == DEVICE_OPERATIONAL_UNITS[metric]
+                assert (f"rate({metric}" in target["expr"]) is metric.endswith("_total")
+                assert "or vector(0)" not in target["expr"]
+    state = panels["Latest update outcome"]["fieldConfig"]["defaults"]
+    assert (state["min"], state["max"]) == (0, 1)
+    assert state["custom"]["lineInterpolation"] == "stepAfter"
+
+
+def test_operational_filters_include_hosts_without_power_readings(dashboard: JSON) -> None:
+    """Never-discovered hosts remain selectable through their diagnostic outcome series."""
+    for variable in dashboard["templating"]["list"]:
+        if variable["name"] in {"host", "device"}:
+            assert "tapo_device_update_success" in variable["definition"]
+            assert "tapo_device_update_success" in variable["query"]["query"]

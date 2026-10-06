@@ -18,7 +18,7 @@
       },
       "id": 1,
       "options": {
-        "content": "**Power in W \u00b7 energy in Wh \u00b7 exporter health.** Filter your devices above.  \nEnergy follows each plug\u2019s calendar. Blank readings mean unavailable data.",
+        "content": "**Power in W \u00b7 energy in Wh \u00b7 exporter health.** Filter devices above. Compact legends below each graph identify devices; hover a line for its label and value. The dashed line is total power. Colours can repeat.",
         "mode": "markdown"
       },
       "title": "Read the fleet at a glance",
@@ -111,7 +111,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "min(up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"})",
+          "expr": "min(up{job=~\"${job}\",instance=~\"${exporter}\"})",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -178,7 +178,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "count((current_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "count((current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -244,7 +244,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum((current_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "sum((current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -310,7 +310,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum((current_consumption_today{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "sum((current_consumption_today{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -376,7 +376,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum((current_month_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "sum((current_month_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -391,7 +391,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Seconds since the most recent Prometheus scrape attempt, successful or failed. This is not the age of the device reading: a timed-out live refresh can return the previous snapshot. Inspect scrape status and exporter logs.",
+      "description": "Seconds since the most recent Prometheus scrape attempt, successful or failed. This is not the age of the device reading: a timed-out live refresh can return an older snapshot. See SDK update timing for collection status; it does not establish physical sensor freshness.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -442,7 +442,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "max(time() - timestamp(up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}))",
+          "expr": "max(time() - timestamp(up{job=~\"${job}\",instance=~\"${exporter}\"}))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -471,11 +471,11 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Instantaneous watts per device and the sum of available readings. Gaps remain visible; a zero reading is a real reported zero. Host and exporter distinguish repeated aliases.",
+      "description": "Instantaneous watts per device and the sum of available readings. Gaps remain visible; a zero reading is a real reported zero. Host addresses distinguish repeated aliases. Device colors follow their legend names across panels. The dashed amber line is the selected total.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -534,20 +534,30 @@
               {
                 "id": "color",
                 "value": {
-                  "fixedColor": "purple",
+                  "fixedColor": "#BF8427",
                   "mode": "fixed"
                 }
               },
               {
                 "id": "custom.fillOpacity",
                 "value": 0
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    8,
+                    5
+                  ],
+                  "fill": "dash"
+                }
               }
             ]
           }
         ]
       },
       "gridPos": {
-        "h": 8,
+        "h": 18,
         "w": 16,
         "x": 0,
         "y": 9
@@ -555,16 +565,14 @@
       "id": 10,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -576,9 +584,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
           "range": true,
           "refId": "A"
         },
@@ -588,7 +596,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum((current_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "sum((current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": false,
           "legendFormat": "Selected total",
           "range": true,
@@ -603,12 +611,13 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Up to ten selected devices with the highest current reported wattage. Rankings omit unavailable readings.",
+      "description": "Up to ten selected devices with the highest current reported wattage. Rankings omit unavailable readings. Each row names its device, host and exporter; colors match the history panels even when ranking changes.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
+          "displayName": "${__field.name}",
           "mappings": [],
           "min": 0,
           "noValue": "No data",
@@ -626,16 +635,16 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 18,
         "w": 8,
         "x": 16,
         "y": 9
       },
       "id": 11,
       "options": {
-        "displayMode": "gradient",
-        "maxVizHeight": 80,
-        "minVizHeight": 24,
+        "displayMode": "basic",
+        "maxVizHeight": 52,
+        "minVizHeight": 36,
         "minVizWidth": 0,
         "namePlacement": "top",
         "orientation": "horizontal",
@@ -647,12 +656,12 @@
           "values": false
         },
         "showUnfilled": true,
-        "sizing": "auto",
+        "sizing": "manual",
         "text": {
-          "titleSize": 14,
-          "valueSize": 22
+          "titleSize": 12,
+          "valueSize": 16
         },
-        "valueMode": "color"
+        "valueMode": "text"
       },
       "targets": [
         {
@@ -661,14 +670,39 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "topk(10, (current_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1)))",
+          "expr": "topk(10, (current_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
           "range": false,
           "refId": "A"
         }
       ],
       "title": "Largest loads now \u00b7 top 10",
+      "transformations": [
+        {
+          "id": "seriesToRows",
+          "options": {}
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "Metric",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "Value",
+                "handlerKey": "field.value"
+              },
+              {
+                "fieldName": "Time",
+                "handlerKey": "__ignore"
+              }
+            ]
+          }
+        }
+      ],
       "type": "bargauge"
     },
     {
@@ -678,7 +712,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 27
       },
       "id": 12,
       "panels": [],
@@ -694,7 +728,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -742,24 +776,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 18,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 28
       },
       "id": 13,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -771,9 +803,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_consumption_today{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_consumption_today{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
           "range": true,
           "refId": "A"
         }
@@ -790,7 +822,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -838,24 +870,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 18,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 28
       },
       "id": 14,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -867,9 +897,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_month_consumption{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_month_consumption{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
           "range": true,
           "refId": "A"
         }
@@ -884,7 +914,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 46
       },
       "id": 15,
       "panels": [],
@@ -900,7 +930,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -948,24 +978,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 18,
         "w": 12,
         "x": 0,
-        "y": 27
+        "y": 47
       },
       "id": 16,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -977,9 +1005,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_voltage{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_voltage{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
           "range": true,
           "refId": "A"
         }
@@ -996,7 +1024,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -1044,24 +1072,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 18,
         "w": 12,
         "x": 12,
-        "y": 27
+        "y": 47
       },
       "id": 17,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -1073,9 +1099,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_current{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_current{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
           "range": true,
           "refId": "A"
         }
@@ -1090,7 +1116,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 65
       },
       "id": 18,
       "panels": [],
@@ -1106,7 +1132,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -1153,24 +1179,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 18,
         "w": 12,
         "x": 0,
-        "y": 36
+        "y": 66
       },
       "id": 19,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -1182,9 +1206,9 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_rssi{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "(current_rssi{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": false,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
           "range": true,
           "refId": "A"
         }
@@ -1197,13 +1221,14 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Signal strength where supported. Indicative display bands: below \u221280 dBm weak, \u221280 to \u221265 dBm fair, above \u221265 dBm stronger. These are display guidance, not alerts.",
+      "description": "Current Wi-Fi signal in dBm, weakest first. Values closer to 0 indicate stronger received signal. Colors identify devices and match their history traces; they do not classify signal quality. Rows include device alias, host and exporter so identical aliases remain distinguishable. Missing readings remain absent; scrape success does not establish device-reading freshness.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic-by-name"
           },
           "decimals": 0,
+          "displayName": "${__field.name}",
           "mappings": [],
           "max": 0,
           "min": -100,
@@ -1212,16 +1237,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "blue",
                 "value": null
-              },
-              {
-                "color": "orange",
-                "value": -80
-              },
-              {
-                "color": "green",
-                "value": -65
               }
             ]
           },
@@ -1230,16 +1247,16 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 18,
         "w": 12,
         "x": 12,
-        "y": 36
+        "y": 66
       },
       "id": 20,
       "options": {
-        "displayMode": "gradient",
-        "maxVizHeight": 80,
-        "minVizHeight": 24,
+        "displayMode": "basic",
+        "maxVizHeight": 52,
+        "minVizHeight": 36,
         "minVizWidth": 0,
         "namePlacement": "top",
         "orientation": "horizontal",
@@ -1251,12 +1268,12 @@
           "values": false
         },
         "showUnfilled": true,
-        "sizing": "auto",
+        "sizing": "manual",
         "text": {
-          "titleSize": 14,
-          "valueSize": 22
+          "titleSize": 12,
+          "valueSize": 16
         },
-        "valueMode": "color"
+        "valueMode": "text"
       },
       "targets": [
         {
@@ -1265,14 +1282,39 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "(current_rssi{job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\",alias=~\"${device:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "sort((current_rssi{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1)))",
           "instant": true,
-          "legendFormat": "{{alias}} \u00b7 {{host}} [{{instance}}]",
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
           "range": false,
           "refId": "A"
         }
       ],
       "title": "Wi-Fi signal now",
+      "transformations": [
+        {
+          "id": "seriesToRows",
+          "options": {}
+        },
+        {
+          "id": "rowsToFields",
+          "options": {
+            "mappings": [
+              {
+                "fieldName": "Metric",
+                "handlerKey": "field.name"
+              },
+              {
+                "fieldName": "Value",
+                "handlerKey": "field.value"
+              },
+              {
+                "fieldName": "Time",
+                "handlerKey": "__ignore"
+              }
+            ]
+          }
+        }
+      ],
       "type": "bargauge"
     },
     {
@@ -1282,7 +1324,505 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 84
+      },
+      "id": 31,
+      "panels": [],
+      "title": "Device updates \u00b7 SDK outcomes and timing",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Duration of the latest completed SDK update attempt in seconds, including python-kasa retries. Excludes queueing, discovery and disconnect work. Zero means no completed attempt yet. A failed attempt can have a duration; it does not mean the reading is fresh.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "noValue": "No data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 85
+      },
+      "id": 32,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "maxHeight": 600,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "(tapo_device_update_duration_seconds{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
+          "instant": false,
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Update duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Latest SDK update outcome: 1 succeeded, 0 failed or no successful update has occurred. Configured hosts that have never been discovered appear as unknown. This is not relay state or proof of physical sensor freshness.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "text": "Failed / not yet updated"
+                },
+                "1": {
+                  "text": "Succeeded"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "max": 1,
+          "min": 0,
+          "noValue": "No data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 97
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "maxHeight": 600,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "(tapo_device_update_success{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
+          "instant": false,
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Latest update outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Seconds since the last successful SDK update. This is not physical sensor freshness: a device can return cached measurements. No data means no successful update timestamp is available, including hosts that have never updated. Interpret the age against your polling interval and update timeout.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "noValue": "No data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 109
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "maxHeight": 600,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "(time() - (tapo_device_last_success_timestamp_seconds{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"} > 0) and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
+          "instant": false,
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Time since successful update",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Rate of failed SDK update attempts, including timeouts. Counters persist through rediscovery and reset when the exporter process restarts. At least two samples are required; a missing series is not zero.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "noValue": "No data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 121
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "maxHeight": 600,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "(rate(tapo_device_update_failures_total{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"}[$__rate_interval]) and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
+          "instant": false,
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Failed updates per second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Rate of SDK update attempts that timed out. These attempts also contribute to failed updates. Includes expiry of the configured update timeout; does not count discovery failures or Prometheus HTTP scrape failures. At least two samples are required.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "noValue": "No data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 133
+      },
+      "id": 36,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "maxHeight": 600,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "(rate(tapo_device_update_timeouts_total{job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\",alias=~\"${device}\"}[$__rate_interval]) and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
+          "instant": false,
+          "legendFormat": "{{alias}} \u00b7 {{host}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Update timeouts per second",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "description": "",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 145
       },
       "id": 21,
       "panels": [],
@@ -1320,7 +1860,7 @@
         "h": 4,
         "w": 4,
         "x": 0,
-        "y": 45
+        "y": 146
       },
       "id": 22,
       "options": {
@@ -1345,7 +1885,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(tapo_discovered_devices{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "sum(tapo_discovered_devices{job=~\"${job}\",instance=~\"${exporter}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1386,7 +1926,7 @@
         "h": 4,
         "w": 4,
         "x": 4,
-        "y": 45
+        "y": 146
       },
       "id": 23,
       "options": {
@@ -1411,7 +1951,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(scrape_samples_scraped{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"})",
+          "expr": "sum(scrape_samples_scraped{job=~\"${job}\",instance=~\"${exporter}\"})",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1452,7 +1992,7 @@
         "h": 4,
         "w": 4,
         "x": 8,
-        "y": 45
+        "y": 146
       },
       "id": 24,
       "options": {
@@ -1477,7 +2017,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "max(scrape_duration_seconds{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"})",
+          "expr": "max(scrape_duration_seconds{job=~\"${job}\",instance=~\"${exporter}\"})",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1518,7 +2058,7 @@
         "h": 4,
         "w": 4,
         "x": 12,
-        "y": 45
+        "y": 146
       },
       "id": 25,
       "options": {
@@ -1543,7 +2083,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(process_resident_memory_bytes{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "sum(process_resident_memory_bytes{job=~\"${job}\",instance=~\"${exporter}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1584,7 +2124,7 @@
         "h": 4,
         "w": 4,
         "x": 16,
-        "y": 45
+        "y": 146
       },
       "id": 26,
       "options": {
@@ -1609,7 +2149,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(process_cpu_seconds_total{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}[$__rate_interval]) and on (job, instance) (up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"} == 1))",
+          "expr": "sum(rate(process_cpu_seconds_total{job=~\"${job}\",instance=~\"${exporter}\"}[$__rate_interval]) and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1650,7 +2190,7 @@
         "h": 4,
         "w": 4,
         "x": 20,
-        "y": 45
+        "y": 146
       },
       "id": 27,
       "options": {
@@ -1675,7 +2215,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "count(up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"})",
+          "expr": "count(up{job=~\"${job}\",instance=~\"${exporter}\"})",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1690,11 +2230,11 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Duration of each scrape attempt, including live probing and serialization. Sustained values near the timeout need investigation in exporter logs or a smaller device concurrency/polling workload.",
+      "description": "Duration of each HTTP scrape attempt, including the wait for live updates and serialization. Healthy readings can finish before failed-device recovery. Compare with the configured exporter wait and Prometheus timeout; investigate repeated wait timeouts and update failures.",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -1741,24 +2281,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 12,
         "x": 0,
-        "y": 49
+        "y": 150
       },
       "id": 28,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -1770,7 +2308,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "scrape_duration_seconds{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}",
+          "expr": "scrape_duration_seconds{job=~\"${job}\",instance=~\"${exporter}\"}",
           "instant": false,
           "legendFormat": "{{instance}}",
           "range": true,
@@ -1789,7 +2327,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "custom": {
             "axisColorMode": "text",
@@ -1853,24 +2391,22 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
+        "h": 10,
         "w": 12,
         "x": 12,
-        "y": 49
+        "y": 150
       },
       "id": 29,
       "options": {
         "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
+          "calcs": [],
+          "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
         },
         "tooltip": {
           "hideZeros": false,
+          "maxHeight": 600,
           "mode": "multi",
           "sort": "desc"
         }
@@ -1882,7 +2418,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "up{job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}",
+          "expr": "up{job=~\"${job}\",instance=~\"${exporter}\"}",
           "instant": false,
           "legendFormat": "{{instance}}",
           "range": true,
@@ -1893,16 +2429,300 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Duration of the latest completed full refresh pass, including failed-device recovery work. Healthy readings can be published before this pass completes. Host and device filters do not apply.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "noValue": "No data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 0,
+        "y": 160
+      },
+      "id": 37,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "maxHeight": 600,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "(tapo_refresh_duration_seconds{job=~\"${job}\",instance=~\"${exporter}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
+          "instant": false,
+          "legendFormat": "{{instance}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Refresh duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "1 while a device refresh pass is running, 0 when idle. Scrape sampling may miss short refreshes. Healthy readings can already be available while recovery continues. Host and device filters do not apply.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "noValue": "No data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 8,
+        "y": 160
+      },
+      "id": 38,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "maxHeight": 600,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "(tapo_refresh_in_progress{job=~\"${job}\",instance=~\"${exporter}\"} and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
+          "instant": false,
+          "legendFormat": "{{instance}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Refresh in progress",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Rate of exporter callers that exhausted their wait for fresh updates and received the current snapshot. A successful HTTP scrape may still increment this counter. This is distinct from device timeouts; background polling normally serves the cache without waiting. Host and device filters do not apply.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic-by-name"
+          },
+          "custom": {
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "min": 0,
+          "noValue": "No data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 8,
+        "x": 16,
+        "y": 160
+      },
+      "id": 39,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "maxHeight": 600,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "(rate(tapo_scrape_refresh_timeouts_total{job=~\"${job}\",instance=~\"${exporter}\"}[$__rate_interval]) and on (job, instance) (up{job=~\"${job}\",instance=~\"${exporter}\"} == 1))",
+          "instant": false,
+          "legendFormat": "{{instance}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Scrape waits timed out per second",
+      "type": "timeseries"
+    },
+    {
       "description": "",
       "gridPos": {
-        "h": 8,
+        "h": 7,
         "w": 24,
         "x": 0,
-        "y": 57
+        "y": 170
       },
       "id": 30,
       "options": {
-        "content": "**Start with exporter scrape status.** If it fails, check the Prometheus target and exporter logs. If it succeeds but plug data is missing, check configured hosts, LAN reachability, Tapo credentials and device capabilities.\n\n**A successful scrape can contain an older snapshot.** The exporter does not expose a device update timestamp or per-device online/relay state. Scrape age cannot establish reading freshness; consult exporter logs if values stop changing. Discovered inventory includes retained devices with failed updates.\n\n**Energy is device-reported Wh.** Today/month gauges reset on the plug\u2019s calendar. They are not counters and are not converted into hourly/yearly estimates. Historical `kasa_*` data remains in Prometheus but is not combined with these different metrics.",
+        "content": "**Start with exporter scrape status.** If it fails, check the Prometheus target and exporter logs. If it succeeds but plug data is missing, check configured hosts, LAN reachability, credentials and device capabilities.\n\n**A successful scrape can contain an older snapshot.** Update outcome, duration and time since the last successful SDK update help explain stalled readings; SDK success does not prove physical sensor freshness. Failed updates are omitted when their result is available, and healthy readings can publish while recovery continues. Check exporter logs for details. The operational panels require pyprom-exporters 0.3.0 or later; older exporters show No data.\n\n**Energy is device-reported Wh.** Today/month gauges reset on the plug\u2019s calendar. They are not counters and are not converted into hourly/yearly estimates. Historical `kasa_*` data is not combined with these different metrics.",
         "mode": "markdown"
       },
       "title": "When data is missing",
@@ -1935,7 +2755,7 @@
         "type": "datasource"
       },
       {
-        "allValue": ".*",
+        "allValue": "",
         "current": {
           "text": "pyprom-exporters",
           "value": "pyprom-exporters"
@@ -1970,7 +2790,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values(up{job=~\"${job:regex}\"}, instance)",
+        "definition": "label_values(up{job=~\"${job}\"}, instance)",
         "hide": 0,
         "includeAll": true,
         "label": "Exporter",
@@ -1978,7 +2798,7 @@
         "name": "exporter",
         "options": [],
         "query": {
-          "query": "label_values(up{job=~\"${job:regex}\"}, instance)",
+          "query": "label_values(up{job=~\"${job}\"}, instance)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
@@ -1996,7 +2816,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}, host)",
+        "definition": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)|tapo_device_update_success\",job=~\"${job}\",instance=~\"${exporter}\"}, host)",
         "hide": 0,
         "includeAll": true,
         "label": "Host",
@@ -2004,7 +2824,7 @@
         "name": "host",
         "options": [],
         "query": {
-          "query": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job:regex}\",instance=~\"${exporter:regex}\"}, host)",
+          "query": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)|tapo_device_update_success\",job=~\"${job}\",instance=~\"${exporter}\"}, host)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
@@ -2022,7 +2842,7 @@
           "type": "prometheus",
           "uid": "${DS_PROMETHEUS}"
         },
-        "definition": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\"}, alias)",
+        "definition": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)|tapo_device_update_success\",job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\"}, alias)",
         "hide": 0,
         "includeAll": true,
         "label": "Device",
@@ -2030,7 +2850,7 @@
         "name": "device",
         "options": [],
         "query": {
-          "query": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)\",job=~\"${job:regex}\",instance=~\"${exporter:regex}\",host=~\"${host:regex}\"}, alias)",
+          "query": "label_values({__name__=~\"current_(consumption|voltage|current|rssi|consumption_today|month_consumption)|tapo_device_update_success\",job=~\"${job}\",instance=~\"${exporter}\",host=~\"${host}\"}, alias)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
@@ -2057,5 +2877,5 @@
   "timezone": "browser",
   "title": "TP-Link \u00b7 Power & Energy",
   "uid": "tp-link-power",
-  "version": 1
+  "version": 5
 }

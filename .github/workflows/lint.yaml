@@ -1,8 +1,7 @@
-name: CI
+name: Code quality and tests
 
 on:
   push:
-    branches: [master, main]
   pull_request:
   workflow_dispatch:
 
@@ -15,42 +14,57 @@ concurrency:
 
 jobs:
   lint:
+    name: Lint, formatting and type checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.19"
           python-version: "3.14"
-      - run: uv sync --locked
-      - run: uv run --locked prek run --all-files
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Run lint, formatting, type and security checks
+        run: uv run --locked prek run --all-files
 
   test:
+    name: Tests and package build (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.19"
           python-version: ${{ matrix.python-version }}
-      - run: uv sync --locked
-      - run: uv run --locked pytest -m 'not integration'
-      - run: uv build --no-sources
+      - name: Install locked dependencies
+        run: uv sync --locked
+      - name: Run unit and contract tests in parallel
+        run: uv run --locked pytest -m 'not integration'
+      - name: Build wheel and source distribution
+        run: uv build --no-sources
 
   integration:
+    name: Docker stack integration tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.2.0
+      - name: Check out repository
+        uses: actions/checkout@v7.0.1
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           version: "0.12.19"
           python-version: "3.14"
-      - run: uv sync --locked
+      - name: Install locked dependencies
+        run: uv sync --locked
       - name: Test provisioned stack with simulated device metrics
         run: uv run --locked pytest -n 0 -m integration
         env:

@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING, cast
 import pytest
 import yaml
 
+from grafana_tp_link.configuration import load_configuration, render_configuration
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
@@ -43,7 +45,7 @@ def mapping(value: object) -> dict[str, object]:
     return cast("dict[str, object]", value)
 
 
-def run(arguments: list[str], *, environment: dict[str, str] | None = None) -> str:
+def run(arguments: list[str], *, environment: dict[str, str] | None = None, input_text: str | None = None) -> str:
     """Run a bounded command and retain output for useful failure reports.
 
     Returns
@@ -54,6 +56,7 @@ def run(arguments: list[str], *, environment: dict[str, str] | None = None) -> s
     result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true] - Explicit argv and resolved Docker path.
         arguments,
         env=environment,
+        input=input_text,
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -119,8 +122,16 @@ class Stack:
     compose_file: Path
     environment: dict[str, str] = field(repr=False)
     exporter_config: Path
+    directory: Path
 
-    def compose(self, *arguments: str) -> str:
+    @property
+    def exporter_port(self) -> int:
+        """The rendered exporter HTTP port."""
+        port = mapping(yaml.safe_load(self.exporter_config.read_text()))["prometheus_port"]
+        assert isinstance(port, int)
+        return port
+
+    def compose(self, *arguments: str, input_text: str | None = None) -> str:
         """Run Compose against only this test's generated project.
 
         Returns
@@ -131,6 +142,7 @@ class Stack:
         return run(
             [self.docker, "compose", "-p", self.project, "-f", str(self.compose_file), *arguments],
             environment=self.environment,
+            input_text=input_text,
         )
 
     def url(self, service: str, port: int) -> str:
@@ -147,6 +159,55 @@ class Stack:
         return f"http://{endpoint}"
 
 
+def isolated_exporter_configuration(source: str) -> str:
+    """Clear device targets and credentials while retaining unrelated exporter settings.
+
+    Returns
+    -------
+    str
+        A YAML copy suitable for running the image without device discovery.
+    """
+    config = mapping(yaml.safe_load(source))
+    exporter = mapping(mapping(config["exporters"])["tapo"])
+    exporter["devices"] = []
+    discovery = mapping(exporter.setdefault("discovery_options", {}))
+    discovery["perform_discovery"] = False
+    discovery.pop("credentials", None)
+    discovery.pop("tapo_username_env_key", None)
+    discovery.pop("tapo_password_env_key", None)
+    return yaml.safe_dump(config, sort_keys=False)
+
+
+def prepare_checkout(directory: Path) -> dict[str, object]:
+    """Copy stack templates and sanitize user settings into a disposable checkout.
+
+    Returns
+    -------
+    dict[str, object]
+        Canonical configuration with device I/O and credentials removed.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    for name in ("prometheus", "grafana"):
+        shutil.copytree(ROOT / name, directory / name)
+    for name in ("compose.yaml", "dash.json"):
+        shutil.copyfile(ROOT / name, directory / name)
+    if image := os.getenv("PYPROM_TEST_EXPORTER_IMAGE"):
+        # Apply explicit development images only to this disposable checkout.
+        compose_file = directory / "compose.yaml"
+        model = mapping(yaml.safe_load(compose_file.read_text()))
+        mapping(mapping(model["services"])["exporter"])["image"] = image
+        compose_file.write_text(yaml.safe_dump(model, sort_keys=False))
+    (directory / "config").mkdir()
+    config = mapping(yaml.safe_load((ROOT / "config/stack.yaml").read_text()))
+    # User-selected host storage must never be mounted into a disposable test project.
+    for service in ("grafana", "prometheus"):
+        mapping(config[service])["data_directory"] = None
+    native = yaml.safe_dump(config["exporter"])
+    config["exporter"] = mapping(yaml.safe_load(isolated_exporter_configuration(native)))
+    (directory / "config/stack.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
+    return config
+
+
 def create_stack(tmp_path: Path) -> Stack:
     """Derive a test project from the real Compose configuration.
 
@@ -158,9 +219,30 @@ def create_stack(tmp_path: Path) -> Stack:
     docker = shutil.which("docker")
     assert docker is not None, "Docker is required when integration tests are explicitly enabled"
     project = f"pyprom-test-{uuid.uuid4().hex[:12]}"
+    configuration = prepare_checkout(tmp_path)
+    native = mapping(configuration["exporter"])
+    # Nondefault settings expose stale image/environment defaults in the real runtime.
+    native.update({"prometheus_port": 18090, "log_level": "WARNING"})
+    (tmp_path / "config/stack.yaml").write_text(yaml.safe_dump(configuration, sort_keys=False))
+    configuration = load_configuration(tmp_path, {}, require_devices=False)
+    runtime = render_configuration(tmp_path, configuration)
+    prometheus_options = mapping(configuration["prometheus"])
     environment = dict(os.environ)
     environment.update(
-        {"GRAFANA_ADMIN_USER": "admin", "GRAFANA_ADMIN_PASSWORD": TEST_PASSWORD, "TAPO_PLUG_DEVICES": "192.0.2.10"}
+        {
+            "GRAFANA_ADMIN_USER": "admin",
+            "GRAFANA_ADMIN_PASSWORD": TEST_PASSWORD,
+            "TP_LINK_USERNAME": "",
+            "TP_LINK_PASSWORD": "",
+            "TAPO_PLUG_DEVICES": "",
+            "GRAFANA_BIND_ADDRESS": "127.0.0.1",
+            "GRAFANA_PORT": "3000",
+            "PROMETHEUS_PORT": str(native["prometheus_port"]),
+            "PYPROM_EXPORTERS_LOG_LEVEL": str(native["log_level"]),
+            "PROMETHEUS_RETENTION_TIME": str(prometheus_options["retention_time"]),
+            "PROMETHEUS_RETENTION_SIZE": str(prometheus_options["retention_size"]),
+            "PYPROM_RUNTIME_DIR": str(runtime),
+        }
     )
     env_file = tmp_path / "empty.env"
     env_file.touch()
@@ -175,7 +257,9 @@ def create_stack(tmp_path: Path) -> Stack:
                     "-p",
                     project,
                     "-f",
-                    str(ROOT / "compose.yaml"),
+                    str(tmp_path / "compose.yaml"),
+                    "-f",
+                    str(runtime / "compose.storage.yaml"),
                     "config",
                     "--format",
                     "json",
@@ -186,19 +270,7 @@ def create_stack(tmp_path: Path) -> Stack:
     )
     services = mapping(model["services"])
     exporter = mapping(services["exporter"])
-    exporter_config = tmp_path / "exporter.yaml"
-    exporter_config.write_bytes((ROOT / "config/exporter.yaml").read_bytes())
-    # The production file has no hosts; environment credentials/hosts are never inherited.
-    exporter["environment"] = {"TP_LINK_USERNAME": "", "TP_LINK_PASSWORD": "", "TAPO_PLUG_DEVICES": ""}
-    exporter["volumes"] = [
-        {
-            "type": "bind",
-            "source": str(exporter_config),
-            "target": "/etc/pyprom-exporters/config.yaml",
-            "read_only": True,
-        }
-    ]
-    configure_fake_metrics(services, exporter["image"], tmp_path)
+    configure_fake_metrics(services, exporter["image"], tmp_path, runtime)
     services["promtool"] = {
         "image": mapping(services["prometheus"])["image"],
         "entrypoint": ["/bin/promtool"],
@@ -207,7 +279,7 @@ def create_stack(tmp_path: Path) -> Stack:
         "read_only": True,
         "tmpfs": mapping(services["prometheus"])["tmpfs"],
         "volumes": [
-            {"type": "bind", "source": str(ROOT / "prometheus"), "target": "/etc/prometheus", "read_only": True}
+            {"type": "bind", "source": str(tmp_path / "prometheus"), "target": "/etc/prometheus", "read_only": True}
         ],
     }
     for name in ("grafana", "prometheus", "exporter"):
@@ -215,15 +287,6 @@ def create_stack(tmp_path: Path) -> Stack:
         service.pop("container_name", None)
         service.pop("ports", None)
         service["restart"] = "no"
-    grafana_env = mapping(mapping(services["grafana"])["environment"])
-    grafana_env.update(
-        {
-            "GF_ANALYTICS_REPORTING_ENABLED": "false",
-            "GF_ANALYTICS_CHECK_FOR_UPDATES": "false",
-            "GF_PLUGINS_PREINSTALL_DISABLED": "true",
-            "GF_NEWS_NEWS_FEED_ENABLED": "false",
-        }
-    )
     # Only browser/query services receive host access. Both exporters have no LAN route.
     for name, port in (("grafana", 3000), ("prometheus", 9090)):
         service = mapping(services[name])
@@ -236,12 +299,12 @@ def create_stack(tmp_path: Path) -> Stack:
         assert str(volume_config.get("name", "")).startswith(project)
     compose_file = tmp_path / "compose.json"
     compose_file.write_text(json.dumps(model))
-    return Stack(docker, project, compose_file, environment, exporter_config)
+    return Stack(docker, project, compose_file, environment, runtime / "exporter.yaml", tmp_path)
 
 
-def configure_fake_metrics(services: dict[str, object], image: object, tmp_path: Path) -> None:
+def configure_fake_metrics(services: dict[str, object], image: object, tmp_path: Path, runtime: Path) -> None:
     """Replace only scrape targets and timing while retaining production rules."""
-    config = mapping(yaml.safe_load((ROOT / "prometheus/prometheus.yml").read_text()))
+    config = mapping(yaml.safe_load((runtime / "prometheus.yml").read_text()))
     global_config = mapping(config.setdefault("global", {}))
     global_config.update({"scrape_interval": "1s", "scrape_timeout": "800ms", "evaluation_interval": "1s"})
     jobs = config["scrape_configs"]
@@ -252,7 +315,7 @@ def configure_fake_metrics(services: dict[str, object], image: object, tmp_path:
         scrape["scrape_timeout"] = "800ms"
         if scrape["job_name"] == "pyprom-exporters":
             scrape["static_configs"] = [{"targets": ["metrics:8090"]}]
-    config_file = tmp_path / "prometheus.yml"
+    config_file = tmp_path / "fake-prometheus.yml"
     config_file.write_text(yaml.safe_dump(config))
     prometheus = mapping(services["prometheus"])
     volumes = prometheus["volumes"]

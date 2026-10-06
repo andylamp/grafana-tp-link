@@ -1,0 +1,17 @@
+{
+  "configurations": [
+    {
+      "env": {
+        "PYTEST_ADDOPTS": "-n 0"
+      },
+      "justMyCode": true,
+      "name": "Python: Debug tests (single process)",
+      "purpose": [
+        "debug-test"
+      ],
+      "request": "launch",
+      "type": "debugpy"
+    }
+  ],
+  "version": "0.2.0"
+}

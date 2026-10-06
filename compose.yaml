@@ -1,6 +1,9 @@
 # Distinct from the legacy launcher project; lifecycle commands must not manage its containers.
 name: tp-link-monitoring
 
+# Use power-monitor to resolve config/stack.yaml before starting services.
+# Interpolation defaults below let recovery commands run without configuration or credentials.
+
 x-logging: &default-logging
   driver: json-file
   options:
@@ -9,27 +12,28 @@ x-logging: &default-logging
 
 services:
   exporter:
-    image: andylamp/pyprom-exporters:0.2.0@sha256:57c777a6e048722870a1af315f1cab26b41bb141872779d6656f33e6b4e4892e
+    image: andylamp/pyprom-exporters:0.3.0@sha256:3c08f5fd950da0af21aa97fc9c3ba9e2be891e8d315edb9c0b7db6a23897d035
     command: ["--config", "/etc/pyprom-exporters/config.yaml", "--no-write-config"]
     environment:
-      TAPO_PLUG_DEVICES: ${TAPO_PLUG_DEVICES:?Set TAPO_PLUG_DEVICES in .env to explicit device IPs or hostnames}
+      PROMETHEUS_PORT: ${PROMETHEUS_PORT:-8090}
+      TAPO_PLUG_DEVICES: ${TAPO_PLUG_DEVICES:-}
       TP_LINK_USERNAME: ${TP_LINK_USERNAME:-}
       TP_LINK_PASSWORD: ${TP_LINK_PASSWORD:-}
-      PYPROM_EXPORTERS_LOG_LEVEL: ${PYPROM_EXPORTERS_LOG_LEVEL:-INFO}
+      PYPROM_EXPORTERS_LOG_LEVEL: ${PYPROM_EXPORTERS_LOG_LEVEL:-}
     user: "65534:65534"
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     tmpfs: [/tmp]
     volumes:
-      - ./config/exporter.yaml:/etc/pyprom-exporters/config.yaml:ro
+      - ${PYPROM_RUNTIME_DIR:-./.runtime/unconfigured}/exporter.yaml:/etc/pyprom-exporters/config.yaml:ro
     healthcheck:
       # A TCP check avoids triggering additional live device refreshes.
       test:
         - CMD
         - python
         - -c
-        - "import socket; socket.create_connection(('127.0.0.1', 8090), timeout=2).close()"
+        - "import os,socket; socket.create_connection(('127.0.0.1', int(os.environ['PROMETHEUS_PORT'])), timeout=2).close()"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -51,7 +55,7 @@ services:
     tmpfs: [/tmp]
     volumes:
       - prometheus-data:/prometheus
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${PYPROM_RUNTIME_DIR:-./.runtime/unconfigured}/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:9090/-/ready"]
@@ -75,7 +79,7 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
       GF_PLUGINS_PREINSTALL_DISABLED: "true"
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/tp-link-power.json
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/tp-link-power.json
       GF_LOG_MODE: console
     ports:
       - "${GRAFANA_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
@@ -85,9 +89,9 @@ services:
     tmpfs: [/tmp]
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ${PYPROM_RUNTIME_DIR:-./.runtime/unconfigured}/datasource.yaml:/etc/grafana/provisioning/datasources/prometheus.yaml:ro
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./dash.json:/var/lib/grafana/dashboards/tp-link-power.json:ro
+      - ./dash.json:/etc/grafana/dashboards/tp-link-power.json:ro
     depends_on:
       prometheus:
         condition: service_healthy

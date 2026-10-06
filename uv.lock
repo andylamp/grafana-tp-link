@@ -39,6 +39,9 @@ wheels = [
 name = "grafana-tp-link"
 version = "0.2.0"
 source = { editable = "." }
+dependencies = [
+    { name = "pyyaml" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -46,12 +49,12 @@ dev = [
     { name = "prek" },
     { name = "pytest" },
     { name = "pytest-xdist" },
-    { name = "pyyaml" },
     { name = "ruff" },
     { name = "ty" },
 ]
 
 [package.metadata]
+requires-dist = [{ name = "pyyaml", specifier = ">=6.0.3" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -59,7 +62,6 @@ dev = [
     { name = "prek", specifier = ">=0.5.3" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", specifier = ">=0.16.9" },
     { name = "ty", specifier = ">=0.0.84" },
 ]

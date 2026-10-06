@@ -31,3 +31,32 @@ process_resident_memory_bytes 10485760
 # HELP process_cpu_seconds_total Total user and system CPU time spent in seconds
 # TYPE process_cpu_seconds_total counter
 process_cpu_seconds_total 12
+# HELP tapo_device_update_success Latest SDK update outcome
+# TYPE tapo_device_update_success gauge
+tapo_device_update_success{host="192.0.2.10",alias="Desk (main)"} 1
+tapo_device_update_success{host="192.0.2.11",alias="Desk (main)"} 0
+# HELP tapo_device_last_success_timestamp_seconds Last successful SDK update timestamp, or zero
+# TYPE tapo_device_last_success_timestamp_seconds gauge
+tapo_device_last_success_timestamp_seconds{host="192.0.2.10",alias="Desk (main)"} 1767225600
+tapo_device_last_success_timestamp_seconds{host="192.0.2.11",alias="Desk (main)"} 0
+# HELP tapo_device_update_duration_seconds Latest SDK update attempt duration
+# TYPE tapo_device_update_duration_seconds gauge
+tapo_device_update_duration_seconds{host="192.0.2.10",alias="Desk (main)"} 0.12
+tapo_device_update_duration_seconds{host="192.0.2.11",alias="Desk (main)"} 0.8
+# HELP tapo_device_update_failures_total Failed SDK update attempts, including timeouts
+# TYPE tapo_device_update_failures_total counter
+tapo_device_update_failures_total{host="192.0.2.10",alias="Desk (main)"} 2
+tapo_device_update_failures_total{host="192.0.2.11",alias="Desk (main)"} 3
+# HELP tapo_device_update_timeouts_total Timed out SDK update attempts
+# TYPE tapo_device_update_timeouts_total counter
+tapo_device_update_timeouts_total{host="192.0.2.10",alias="Desk (main)"} 0
+tapo_device_update_timeouts_total{host="192.0.2.11",alias="Desk (main)"} 2
+# HELP tapo_refresh_duration_seconds Latest complete refresh duration
+# TYPE tapo_refresh_duration_seconds gauge
+tapo_refresh_duration_seconds 0.9
+# HELP tapo_refresh_in_progress Whether a refresh is running
+# TYPE tapo_refresh_in_progress gauge
+tapo_refresh_in_progress 1
+# HELP tapo_scrape_refresh_timeouts_total Callers whose wait for updates timed out
+# TYPE tapo_scrape_refresh_timeouts_total counter
+tapo_scrape_refresh_timeouts_total 4

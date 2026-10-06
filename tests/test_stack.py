@@ -8,29 +8,37 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
-from tests.integration.support import mapping
+from grafana_tp_link.configuration import load_configuration, render_configuration
+from tests.integration import support
+from tests.integration.support import TEST_PASSWORD, isolated_exporter_configuration, mapping, prepare_checkout
 from tests.integration.test_stack_smoke import expand, expressions
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_scraping_uses_single_exporter_and_a_compatible_deadline() -> None:
+def test_scraping_uses_single_exporter_and_a_compatible_deadline(tmp_path: Path) -> None:
     """Prometheus should scrape the exporter once with room for HTTP transport."""
-    prometheus = mapping(yaml.safe_load((ROOT / "prometheus/prometheus.yml").read_text()))
+    prepare_checkout(tmp_path)
+    configuration = load_configuration(tmp_path, {}, require_devices=False)
+    runtime = render_configuration(tmp_path, configuration)
+    prometheus = mapping(yaml.safe_load((runtime / "prometheus.yml").read_text()))
+    config = mapping(yaml.safe_load((runtime / "exporter.yaml").read_text()))
     jobs = prometheus["scrape_configs"]
     assert isinstance(jobs, list)
     job = next(mapping(value) for value in jobs if mapping(value)["job_name"] == "pyprom-exporters")
-    assert job["static_configs"] == [{"targets": ["exporter:8090"]}]
+    assert job["static_configs"] == [{"targets": [f"exporter:{config['prometheus_port']}"]}]
     assert job["metrics_path"] == "/metrics"
     assert "relabel_configs" not in job
-    config = mapping(yaml.safe_load((ROOT / "config/exporter.yaml").read_text()))
     exporter = mapping(mapping(config["exporters"])["tapo"])
     assert mapping(exporter["discovery_options"])["perform_discovery"] is False
-    assert exporter["devices"] == []
+    assert isinstance(exporter["devices"], list)
     timeout = mapping(prometheus["global"])["scrape_timeout"]
     interval = mapping(prometheus["global"])["scrape_interval"]
+    assert timeout == mapping(configuration["prometheus"])["scrape_timeout"]
+    assert interval == mapping(configuration["prometheus"])["scrape_interval"]
     assert float(str(mapping(exporter["prometheus_options"])["scrape_timeout"])) < float(
         str(timeout).removesuffix("s")
     )
@@ -61,6 +69,22 @@ def test_compose_scopes_storage_and_protects_local_configuration() -> None:
     assert "depends_on" not in mapping(services["prometheus"])
 
 
+def test_provisioned_dashboard_is_mounted_outside_grafana_data() -> None:
+    """Dashboard mounts must not create root-owned placeholders inside host data binds."""
+    model = mapping(yaml.safe_load((ROOT / "compose.yaml").read_text()))
+    grafana = mapping(mapping(model["services"])["grafana"])
+    provider = mapping(yaml.safe_load((ROOT / "grafana/provisioning/dashboards/power.yaml").read_text()))
+    providers = provider["providers"]
+    assert isinstance(providers, list)
+    path = str(mapping(mapping(providers[0])["options"])["path"])
+    home = str(mapping(grafana["environment"])["GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH"])
+    assert path == "/etc/grafana/dashboards"
+    assert home == f"{path}/tp-link-power.json"
+    volumes = grafana["volumes"]
+    assert isinstance(volumes, list)
+    assert f"./dash.json:{home}:ro" in volumes
+
+
 def test_dashboard_uses_native_units_host_identity_and_provisioned_datasource() -> None:
     """Dashboard expressions retain host identity and avoid rate on energy gauges."""
     dashboard = mapping(json.loads((ROOT / "dash.json").read_text()))
@@ -80,3 +104,80 @@ def test_dashboard_uses_native_units_host_identity_and_provisioned_datasource() 
         for energy_metric in ("current_consumption_today", "current_month_consumption"):
             assert f"rate({energy_metric}" not in expanded
             assert f"increase({energy_metric}" not in expanded
+
+
+def test_integration_configuration_removes_user_device_targets_and_credentials() -> None:
+    """User-edited device lists cannot make Docker tests probe real devices."""
+    original = {
+        "prometheus_port": 8090,
+        "exporters": {
+            "tapo": {
+                "devices": ["192.0.2.10"],
+                "max_concurrent_devices": 7,
+                "discovery_options": {
+                    "perform_discovery": True,
+                    "timeout": 4,
+                    "credentials": {"username": "fixture-user", "password": TEST_PASSWORD},
+                    "tapo_username_env_key": "EXISTING_ACCOUNT_USER",
+                    "tapo_password_env_key": "EXISTING_ACCOUNT_PASSWORD",  # pragma: allowlist secret
+                },
+            }
+        },
+    }
+    isolated = mapping(yaml.safe_load(isolated_exporter_configuration(yaml.safe_dump(original))))
+    exporter = mapping(mapping(isolated["exporters"])["tapo"])
+    assert exporter["devices"] == []
+    assert exporter["max_concurrent_devices"] == 7
+    assert exporter["discovery_options"] == {"perform_discovery": False, "timeout": 4}
+    assert isolated["prometheus_port"] == 8090
+
+
+def test_integration_checkout_cannot_mount_user_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A user-edited data path is replaced by test-project volumes before Docker sees it."""
+    source = tmp_path / "source"
+    config = prepare_checkout(source)
+    user_data = tmp_path / "user-data"
+    user_data.mkdir()
+    marker = user_data / "keep.txt"
+    marker.write_text("Existing data must remain untouched.")
+    for service in ("grafana", "prometheus"):
+        mapping(config[service])["data_directory"] = str(user_data)
+    (source / "config/stack.yaml").write_text(yaml.safe_dump(config))
+    monkeypatch.setattr(support, "ROOT", source)
+    directory = tmp_path / "isolated"
+    prepare_checkout(directory)
+    effective = load_configuration(directory, {}, require_devices=False)
+    runtime = render_configuration(directory, effective)
+    storage = mapping(yaml.safe_load((runtime / "compose.storage.yaml").read_text()))
+    for service in ("grafana", "prometheus"):
+        volumes = mapping(mapping(storage["services"])[service])["volumes"]
+        assert isinstance(volumes, list)
+        assert mapping(volumes[0])["type"] == "volume"
+        assert mapping(volumes[0])["source"] == f"{service}-data"
+    assert marker.read_text() == "Existing data must remain untouched."
+
+
+@pytest.mark.parametrize("image", [None, "", "pyprom-exporters:local-test"])
+def test_integration_image_selection_changes_only_the_disposable_exporter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, image: str | None
+) -> None:
+    """Explicit local images preserve pinned source images, sanitized settings, and test isolation."""
+    if image is None:
+        monkeypatch.delenv("PYPROM_TEST_EXPORTER_IMAGE", raising=False)
+    else:
+        monkeypatch.setenv("PYPROM_TEST_EXPORTER_IMAGE", image)
+    original = (ROOT / "compose.yaml").read_bytes()
+    source = mapping(yaml.safe_load(original))
+    config = prepare_checkout(tmp_path)
+    copied = mapping(yaml.safe_load((tmp_path / "compose.yaml").read_text()))
+    original_services = mapping(source["services"])
+    selected_services = mapping(copied["services"])
+    assert mapping(selected_services["exporter"])["image"] == (
+        image or mapping(original_services["exporter"])["image"]
+    )
+    for name in ("prometheus", "grafana"):
+        assert selected_services[name] == original_services[name]
+    native = mapping(mapping(mapping(config["exporter"])["exporters"])["tapo"])
+    assert native["devices"] == []
+    assert mapping(native["discovery_options"])["perform_discovery"] is False
+    assert (ROOT / "compose.yaml").read_bytes() == original

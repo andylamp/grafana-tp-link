@@ -1,0 +1,39 @@
+# Primary configuration for the monitoring stack. Keep credentials in .env.
+# Supported nonempty environment overrides take precedence over these settings.
+grafana:
+  bind_address: "localhost"
+  port: 3333
+  # null keeps Docker-managed storage; set a host directory such as ./data/grafana.
+  data_directory: null
+prometheus:
+  retention_time: "3y"
+  retention_size: "10GB"
+  scrape_interval: "30s"
+  scrape_timeout: "25s"
+  evaluation_interval: "30s"
+  # null keeps Docker-managed storage; set a host directory such as ./data/prometheus.
+  data_directory: null
+exporter:
+  prometheus_port: 8090
+  log_level: INFO
+  exporters:
+    tapo:
+      # Replace [] with a list of individual IPs or resolvable hostnames, for example:
+      # devices:
+      #   - "192.0.2.10"  # Office desk
+      #   - "kitchen-plug.lan"  # Coffee machine
+      # Leave TAPO_PLUG_DEVICES empty in .env to use this list.
+      devices: []
+      max_concurrent_devices: 10
+      # Bound each whole SDK update, including its internal request retries.
+      update_timeout: 10.0
+      discovery_options:
+        # Docker bridge networks cannot reliably discover broadcast traffic on the LAN.
+        perform_discovery: false
+        discovery_timeout: 3
+        timeout: 5
+        with_update: true
+      prometheus_options:
+        refresh_interval: null
+        # Leave five seconds for serialization/transport inside Prometheus's 25s deadline.
+        scrape_timeout: 20.0

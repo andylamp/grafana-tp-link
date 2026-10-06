@@ -1,7 +1,7 @@
 # Migrating an existing installation
 
 This migration replaces `fffonion/tplink-plug-exporter` with `pyprom-exporters` and provisions a new dashboard for
-Grafana 13.2.2 and Prometheus 3.15.0. The default Compose stack uses new named volumes. It does not inspect, upgrade,
+Grafana 13.2.3 and Prometheus 3.15.0. The default Compose stack uses new named volumes. It does not inspect, upgrade,
 copy or remove data from an older installation.
 
 For an existing deployment, preserve the original data and rehearse any database upgrade on a separate copy.
@@ -65,7 +65,8 @@ with Prometheus 3.x. Check readiness, historical queries and logs at that step. 
 bridge; Prometheus 3 data cannot be read by versions older than 2.55. Read the
 [Prometheus 3 migration guide][prometheus-migration] and [3.0 release guidance][prometheus-release].
 
-Review retention before opening the copied store. This stack defaults to three years or 10 GB of stored blocks,
+Review `prometheus.retention_time` and `prometheus.retention_size` in `config/stack.yaml` before opening the copied store.
+This stack defaults to three years or 10 GB of stored blocks,
 whichever limit is reached first; shorter limits can remove historical data from the working copy.
 Keep the original backup outside the active data directory.
 
@@ -90,38 +91,41 @@ docker image inspect --format '{{.Config.User}}' \
 Adjust ownership of the working copy for your Docker environment; rootless Docker and user namespaces can change how
 container IDs map onto the host. Do not recursively change ownership of the original backup.
 
-After the copied store has passed the staged upgrade, create an ignored `compose.override.yaml`:
+After the copied store has passed the staged upgrade, set its path in the existing `prometheus` section of
+`config/stack.yaml` (or your selected stack YAML), retaining the section's other settings:
 
 ```yaml
-services:
-  prometheus:
-    volumes:
-      - type: bind
-        source: ./data/prometheus
-        target: /prometheus
-        bind:
-          create_host_path: false
+prometheus:
+  data_directory: ./data/prometheus
 ```
 
-The override replaces the storage mount with the matching container target while retaining the read-only configuration
-mounts. `create_host_path: false` makes a missing working directory fail rather than silently create empty storage.
-Compose's [merge rules][compose-merge] define this behavior.
-
-Pass both files explicitly:
+Relative paths resolve from the checkout, including when selecting a YAML file outside it. The generated bind mount
+uses `/prometheus` inside the container and retains the read-only configuration mounts.
+`create_host_path: false` makes a missing working directory fail rather than silently create empty storage.
+Validate and start through the utility so it renders configuration and storage settings:
 
 ```sh
-docker compose --env-file .env -f compose.yaml -f compose.override.yaml config --quiet
-docker compose --env-file .env -f compose.yaml -f compose.override.yaml up -d --wait
+uv run --locked power-monitor check
+uv run --locked power-monitor up
 ```
 
-The `power-monitor` utility selects `compose.yaml` explicitly and does not load this override.
-For a deployment using it, continue passing both files to lifecycle commands:
+For an alternative stack file, use `power-monitor --config config.local.yaml check` and the same selection for `up`.
+A different YAML file does not select a different Compose project or migrate data. Select separate project names
+and separate storage when rehearsing an independent deployment. Do not substitute raw `docker compose up`, which
+skips rendering the unified configuration.
+
+If migrating from a previous local Compose storage override, remove the duplicate storage entries after transferring
+their paths into YAML. Explicit `--compose-file` overrides are applied last and can override generated YAML storage.
+Retain any unrelated custom options. Advanced service customization can still use:
 
 ```sh
-docker compose --env-file .env -f compose.yaml -f compose.override.yaml ps
-docker compose --env-file .env -f compose.yaml -f compose.override.yaml logs --tail 100 prometheus
-docker compose --env-file .env -f compose.yaml -f compose.override.yaml down
+uv run --locked power-monitor --compose-file compose.override.yaml up
+uv run --locked power-monitor --compose-file compose.override.yaml down
 ```
+
+The base Compose file is loaded first, generated storage follows for `check`/`up`, and explicit override files follow
+in order. Their [merge rules][compose-merge] apply. Retain the same explicit overrides for all lifecycle commands,
+including reset. YAML-selected host directories are retained by `reset --yes`, as are explicitly overridden bind mounts.
 
 Confirm that historical queries still work and that new `current_consumption` samples arrive before retiring the old
 installation. Keep the original backup for rollback; opening an upgraded store with an older binary is not a substitute
@@ -147,23 +151,18 @@ using Grafana environment settings or a read-only configuration mount. For examp
 copying its file or the database alone does not apply those settings.
 
 Once a copied SQLite data directory is verified with the target version, put it at an ignored path such as `data/grafana`.
-Add this service entry alongside any Prometheus override:
+Set its path in the existing `grafana` section of the same stack YAML:
 
 ```yaml
-services:
-  grafana:
-    volumes:
-      - type: bind
-        source: ./data/grafana
-        target: /var/lib/grafana
-        bind:
-          create_host_path: false
+grafana:
+  data_directory: ./data/grafana
 ```
 
-Merge both service entries into one `services` mapping if preserving both databases.
-Confirm that the copied data is writable by the pinned Grafana image's configured user and that the resolved mounts still
-include the repository's datasource provisioning, dashboard provider and `dash.json`.
-Use the same explicit two-file Compose commands above for this deployment.
+Confirm that the copied data is writable by the pinned Grafana image's configured user. The utility retains the
+rendered datasource configuration, dashboard provider and `dash.json` mounts. The dashboard mount lives under
+`/etc/grafana/dashboards`, separate from the copied data directory. Use the same `check` and `up` commands
+shown above, including `--config` when selecting a custom stack file. If you require additional Grafana environment or
+configuration mounts, retain those in your explicit `--compose-file` override and pass it to each lifecycle command.
 
 Changing `GRAFANA_ADMIN_PASSWORD` in `.env` does not reset an existing database's administrator password.
 Use the existing account or Grafana's documented reset procedure. Review datasource UID `prometheus`, folder UID
@@ -172,18 +171,37 @@ Keep the old dashboard under a separate UID if you want to retain it for histori
 
 ## Metric and dashboard changes
 
-Prometheus now scrapes one aggregate endpoint at `exporter:8090/metrics` with job `pyprom-exporters`.
-Explicit device hosts belong in `TAPO_PLUG_DEVICES`;
-the old per-device scrape target/relabel configuration is no longer used.
-The endpoint probes devices concurrently. Its scrape timeout is 25 seconds, its interval is 30 seconds, and the exporter's
-live-refresh wait is 20 seconds by default.
+Prometheus now scrapes one aggregate endpoint, normally `exporter:8090/metrics`, with job `pyprom-exporters`.
+All noncredential settings now live in `config/stack.yaml`. Configure explicit hosts under
+`exporter.exporters.tapo.devices`, one address per YAML entry. Inline comments can describe each plug.
+The old per-device scrape target/relabel configuration is no longer used.
+See the [YAML inventory example](../README.md#quick-start); credentials remain in `.env`.
+
+When migrating from an earlier version of this branch, move native exporter settings from `config/exporter.yaml`
+under the `exporter` section of `config/stack.yaml`. Move noncredential `.env` settings into their corresponding
+`grafana`, `prometheus` or `exporter` YAML sections, then remove or comment out those environment overrides.
+The [override table](../README.md#optional-environment-overrides) maps the supported variables to YAML settings.
+Account credentials stay in `.env`; do not copy them into YAML.
+
+A nonempty resolved `TAPO_PLUG_DEVICES` still replaces the entire YAML list. Clear an old list in `.env` and unset
+any exported shell value when switching to YAML. Shell values take precedence over `.env`; empty resolved values use
+YAML, while whitespace/comma-only lists are rejected. `check` and `up` require at least one explicit host.
+
+Use `power-monitor check`, then `power-monitor up` after YAML or environment changes. The utility writes credential-free
+native configuration into ignored `.runtime/<digest>/` directories, preserving the source YAML and its comments.
+Changed mount paths cause `up` to recreate affected containers with their existing data volumes; no manual restart is needed.
+The same selected YAML also controls both data directories; include `--config` on both commands when using a custom file.
+Explicit Compose overrides, if still needed for advanced settings, follow generated storage settings.
+
+The default scrape timeout is 25 seconds, its interval is 30 seconds, and the exporter's live-refresh wait is 20 seconds.
+The renderer keeps the scrape target and Grafana datasource interval aligned with your YAML configuration.
 
 | Previous dashboard concept | New metric or behavior |
 | --- | --- |
 | `kasa_power_load` | `current_consumption`, in W |
 | `kasa_current` | `current_current`, in A, where supported |
 | `kasa_voltage` | `current_voltage`, in V, where supported |
-| `kasa_online` | No direct replacement; exporter scrape health and reporting-series count are separate concepts |
+| `kasa_online` | No direct replacement; latest SDK update result (0.3.0+) and scrape health are separate concepts |
 | `kasa_relay_state` | Not exposed by this exporter |
 | Sample-summed hourly/yearly energy | Device-reported `current_consumption_today` and `current_month_consumption`, in Wh |
 | Alias-only series labels | `host` and `alias`, plus Prometheus `job` and `instance` |
@@ -197,6 +215,19 @@ To reuse only the dashboard elsewhere, import [dash.json](../dash.json) as a sta
 Select its Prometheus source using **Data source**. It has no API request wrapper or external panel plugins.
 Select the appropriate job, exporter, host and device filters for your installation.
 
+## Exporter update budgets and operational diagnostics
+
+Exporter 0.3.0 adds bounded whole-device updates and per-device diagnostics without changing existing power or energy
+metric names and units. Its optional `exporter.exporters.tapo.update_timeout` setting defaults to `10.0` seconds and
+must be finite and positive. Older images reject this setting; update the exporter image before adding it to stack YAML.
+The deadline covers python-kasa's complete update, including its internal retries. Cleanup after a timeout is separately
+bounded, and previously failed devices do not run ahead of healthy devices on the next refresh.
+
+The dashboard's operational panels require these newer metrics. Importing the dashboard against exporter 0.2.0 keeps
+existing power panels usable, but the new diagnostics have no data. Device update success and time since the last
+successful SDK update describe communication with the plug, not independently measured physical-sensor freshness or
+relay state. Compare the new diagnostic panels with service scrape health when assessing partial device failures.
+
 ## Validate before retiring the old deployment
 
 - Verify service health and review exporter, Prometheus and Grafana logs.
@@ -206,8 +237,9 @@ Select the appropriate job, exporter, host and device filters for your installat
 - Verify Grafana login, datasource provisioning and the new dashboard.
 - Keep backups and the recorded old image digests until the migration is accepted.
 
-The included alerts have no configured notification delivery. They can identify failed exporter scrapes and missing
-reported power series, but cannot prove that a successfully returned snapshot is fresh. See the
+The included alerts have no configured notification delivery. They identify failed exporter scrapes and missing power
+series; exporter 0.3.0 also supports persistent device-update failures and repeated scrape-wait timeouts. SDK success does
+not prove physical-sensor freshness. See the
 [dashboard and alert limitations](../README.md#reading-and-reusing-the-dashboard).
 
 [grafana-backup]: https://grafana.com/docs/grafana/latest/administration/back-up-grafana/

@@ -33,3 +33,25 @@ groups:
         annotations:
           summary: Previously observed plug has stopped reporting
           description: 'Host {{ $labels.host }} reported power within 24h but has no current reading.'
+
+      - alert: TapoDeviceUpdateFailing
+        expr: >-
+          (min by (job, instance, host) (tapo_device_update_success{job="pyprom-exporters"}) == 0)
+          and on (job, instance) (up{job="pyprom-exporters"} == 1)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Plug SDK updates are failing
+          description: 'Host {{ $labels.host }} has no successful latest SDK update for five minutes. Check discovery, credentials and connectivity; this is not a physical sensor freshness test.'
+
+      - alert: TapoScrapeRefreshWaitsTimingOut
+        expr: >-
+          (increase(tapo_scrape_refresh_timeouts_total{job="pyprom-exporters"}[5m]) >= 3)
+          and on (job, instance) (up{job="pyprom-exporters"} == 1)
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Exporter callers repeatedly time out waiting for updates
+          description: At least three refresh waits timed out within five minutes. HTTP scrapes can succeed with older readings; review update durations, the exporter wait and the Prometheus timeout.

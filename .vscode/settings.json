@@ -1,0 +1,59 @@
+{
+  "[json]": {
+    "editor.defaultFormatter": "vscode.json-language-features",
+    "editor.detectIndentation": false,
+    "editor.formatOnSave": true,
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "vscode.json-language-features",
+    "editor.detectIndentation": false,
+    "editor.formatOnSave": true,
+    "editor.insertSpaces": true,
+    "editor.tabSize": 2
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "DavidAnson.vscode-markdownlint",
+    "editor.formatOnSave": true
+  },
+  "[python]": {
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    },
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true
+  },
+  "files.exclude": {
+    "**/*.egg-info": true,
+    "**/.coverage.*": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.runtime": true,
+    "**/.ty": true,
+    "**/.venv": true,
+    "**/__pycache__": true,
+    "**/htmlcov": true
+  },
+  "files.watcherExclude": {
+    "**/.pytest_cache/**": true,
+    "**/.ruff_cache/**": true,
+    "**/.runtime/**": true,
+    "**/.ty/**": true,
+    "**/.venv/**": true,
+    "**/__pycache__/**": true,
+    "**/data/**": true,
+    "**/report/**": true
+  },
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv",
+  "python.terminal.useEnvFile": false,
+  "python.testing.pytestArgs": [
+    "tests"
+  ],
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "ruff.configurationPreference": "filesystemFirst",
+  "ruff.importStrategy": "fromEnvironment",
+  "ty.importStrategy": "fromEnvironment"
+}
