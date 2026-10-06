@@ -12,7 +12,7 @@ x-logging: &default-logging
 
 services:
   exporter:
-    image: andylamp/pyprom-exporters:0.2.0@sha256:57c777a6e048722870a1af315f1cab26b41bb141872779d6656f33e6b4e4892e
+    image: andylamp/pyprom-exporters:0.3.0@sha256:3c08f5fd950da0af21aa97fc9c3ba9e2be891e8d315edb9c0b7db6a23897d035
     command: ["--config", "/etc/pyprom-exporters/config.yaml", "--no-write-config"]
     environment:
       PROMETHEUS_PORT: ${PROMETHEUS_PORT:-8090}
@@ -79,7 +79,7 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
       GF_PLUGINS_PREINSTALL_DISABLED: "true"
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/tp-link-power.json
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/tp-link-power.json
       GF_LOG_MODE: console
     ports:
       - "${GRAFANA_BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
@@ -91,7 +91,7 @@ services:
       - grafana-data:/var/lib/grafana
       - ${PYPROM_RUNTIME_DIR:-./.runtime/unconfigured}/datasource.yaml:/etc/grafana/provisioning/datasources/prometheus.yaml:ro
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./dash.json:/var/lib/grafana/dashboards/tp-link-power.json:ro
+      - ./dash.json:/etc/grafana/dashboards/tp-link-power.json:ro
     depends_on:
       prometheus:
         condition: service_healthy

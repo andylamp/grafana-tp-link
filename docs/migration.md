@@ -1,7 +1,7 @@
 # Migrating an existing installation
 
 This migration replaces `fffonion/tplink-plug-exporter` with `pyprom-exporters` and provisions a new dashboard for
-Grafana 13.2.2 and Prometheus 3.15.0. The default Compose stack uses new named volumes. It does not inspect, upgrade,
+Grafana 13.2.3 and Prometheus 3.15.0. The default Compose stack uses new named volumes. It does not inspect, upgrade,
 copy or remove data from an older installation.
 
 For an existing deployment, preserve the original data and rehearse any database upgrade on a separate copy.
@@ -159,7 +159,8 @@ grafana:
 ```
 
 Confirm that the copied data is writable by the pinned Grafana image's configured user. The utility retains the
-rendered datasource configuration, dashboard provider and `dash.json` mounts. Use the same `check` and `up` commands
+rendered datasource configuration, dashboard provider and `dash.json` mounts. The dashboard mount lives under
+`/etc/grafana/dashboards`, separate from the copied data directory. Use the same `check` and `up` commands
 shown above, including `--config` when selecting a custom stack file. If you require additional Grafana environment or
 configuration mounts, retain those in your explicit `--compose-file` override and pass it to each lifecycle command.
 
@@ -200,7 +201,7 @@ The renderer keeps the scrape target and Grafana datasource interval aligned wit
 | `kasa_power_load` | `current_consumption`, in W |
 | `kasa_current` | `current_current`, in A, where supported |
 | `kasa_voltage` | `current_voltage`, in V, where supported |
-| `kasa_online` | No direct replacement; exporter scrape health and reporting-series count are separate concepts |
+| `kasa_online` | No direct replacement; latest SDK update result (0.3.0+) and scrape health are separate concepts |
 | `kasa_relay_state` | Not exposed by this exporter |
 | Sample-summed hourly/yearly energy | Device-reported `current_consumption_today` and `current_month_consumption`, in Wh |
 | Alias-only series labels | `host` and `alias`, plus Prometheus `job` and `instance` |
@@ -214,6 +215,19 @@ To reuse only the dashboard elsewhere, import [dash.json](../dash.json) as a sta
 Select its Prometheus source using **Data source**. It has no API request wrapper or external panel plugins.
 Select the appropriate job, exporter, host and device filters for your installation.
 
+## Exporter update budgets and operational diagnostics
+
+Exporter 0.3.0 adds bounded whole-device updates and per-device diagnostics without changing existing power or energy
+metric names and units. Its optional `exporter.exporters.tapo.update_timeout` setting defaults to `10.0` seconds and
+must be finite and positive. Older images reject this setting; update the exporter image before adding it to stack YAML.
+The deadline covers python-kasa's complete update, including its internal retries. Cleanup after a timeout is separately
+bounded, and previously failed devices do not run ahead of healthy devices on the next refresh.
+
+The dashboard's operational panels require these newer metrics. Importing the dashboard against exporter 0.2.0 keeps
+existing power panels usable, but the new diagnostics have no data. Device update success and time since the last
+successful SDK update describe communication with the plug, not independently measured physical-sensor freshness or
+relay state. Compare the new diagnostic panels with service scrape health when assessing partial device failures.
+
 ## Validate before retiring the old deployment
 
 - Verify service health and review exporter, Prometheus and Grafana logs.
@@ -223,8 +237,9 @@ Select the appropriate job, exporter, host and device filters for your installat
 - Verify Grafana login, datasource provisioning and the new dashboard.
 - Keep backups and the recorded old image digests until the migration is accepted.
 
-The included alerts have no configured notification delivery. They can identify failed exporter scrapes and missing
-reported power series, but cannot prove that a successfully returned snapshot is fresh. See the
+The included alerts have no configured notification delivery. They identify failed exporter scrapes and missing power
+series; exporter 0.3.0 also supports persistent device-update failures and repeated scrape-wait timeouts. SDK success does
+not prove physical-sensor freshness. See the
 [dashboard and alert limitations](../README.md#reading-and-reusing-the-dashboard).
 
 [grafana-backup]: https://grafana.com/docs/grafana/latest/administration/back-up-grafana/

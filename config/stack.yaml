@@ -25,6 +25,8 @@ exporter:
       # Leave TAPO_PLUG_DEVICES empty in .env to use this list.
       devices: []
       max_concurrent_devices: 10
+      # Bound each whole SDK update, including its internal request retries.
+      update_timeout: 10.0
       discovery_options:
         # Docker bridge networks cannot reliably discover broadcast traffic on the LAN.
         perform_discovery: false

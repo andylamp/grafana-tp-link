@@ -7,17 +7,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import pytest
 import yaml
 
 from grafana_tp_link.configuration import load_configuration, render_configuration
 from tests.integration import support
 from tests.integration.support import TEST_PASSWORD, isolated_exporter_configuration, mapping, prepare_checkout
 from tests.integration.test_stack_smoke import expand, expressions
-
-if TYPE_CHECKING:
-    import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -72,6 +69,22 @@ def test_compose_scopes_storage_and_protects_local_configuration() -> None:
     assert "depends_on" not in mapping(services["prometheus"])
 
 
+def test_provisioned_dashboard_is_mounted_outside_grafana_data() -> None:
+    """Dashboard mounts must not create root-owned placeholders inside host data binds."""
+    model = mapping(yaml.safe_load((ROOT / "compose.yaml").read_text()))
+    grafana = mapping(mapping(model["services"])["grafana"])
+    provider = mapping(yaml.safe_load((ROOT / "grafana/provisioning/dashboards/power.yaml").read_text()))
+    providers = provider["providers"]
+    assert isinstance(providers, list)
+    path = str(mapping(mapping(providers[0])["options"])["path"])
+    home = str(mapping(grafana["environment"])["GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH"])
+    assert path == "/etc/grafana/dashboards"
+    assert home == f"{path}/tp-link-power.json"
+    volumes = grafana["volumes"]
+    assert isinstance(volumes, list)
+    assert f"./dash.json:{home}:ro" in volumes
+
+
 def test_dashboard_uses_native_units_host_identity_and_provisioned_datasource() -> None:
     """Dashboard expressions retain host identity and avoid rate on energy gauges."""
     dashboard = mapping(json.loads((ROOT / "dash.json").read_text()))
@@ -105,6 +118,8 @@ def test_integration_configuration_removes_user_device_targets_and_credentials()
                     "perform_discovery": True,
                     "timeout": 4,
                     "credentials": {"username": "fixture-user", "password": TEST_PASSWORD},
+                    "tapo_username_env_key": "EXISTING_ACCOUNT_USER",
+                    "tapo_password_env_key": "EXISTING_ACCOUNT_PASSWORD",  # pragma: allowlist secret
                 },
             }
         },
@@ -140,3 +155,29 @@ def test_integration_checkout_cannot_mount_user_storage(tmp_path: Path, monkeypa
         assert mapping(volumes[0])["type"] == "volume"
         assert mapping(volumes[0])["source"] == f"{service}-data"
     assert marker.read_text() == "Existing data must remain untouched."
+
+
+@pytest.mark.parametrize("image", [None, "", "pyprom-exporters:local-test"])
+def test_integration_image_selection_changes_only_the_disposable_exporter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, image: str | None
+) -> None:
+    """Explicit local images preserve pinned source images, sanitized settings, and test isolation."""
+    if image is None:
+        monkeypatch.delenv("PYPROM_TEST_EXPORTER_IMAGE", raising=False)
+    else:
+        monkeypatch.setenv("PYPROM_TEST_EXPORTER_IMAGE", image)
+    original = (ROOT / "compose.yaml").read_bytes()
+    source = mapping(yaml.safe_load(original))
+    config = prepare_checkout(tmp_path)
+    copied = mapping(yaml.safe_load((tmp_path / "compose.yaml").read_text()))
+    original_services = mapping(source["services"])
+    selected_services = mapping(copied["services"])
+    assert mapping(selected_services["exporter"])["image"] == (
+        image or mapping(original_services["exporter"])["image"]
+    )
+    for name in ("prometheus", "grafana"):
+        assert selected_services[name] == original_services[name]
+    native = mapping(mapping(mapping(config["exporter"])["exporters"])["tapo"])
+    assert native["devices"] == []
+    assert mapping(native["discovery_options"])["perform_discovery"] is False
+    assert (ROOT / "compose.yaml").read_bytes() == original

@@ -50,10 +50,6 @@ def prepare_selected_storage(instance: Stack, tmp_path: Path) -> tuple[Path, dic
     for directory in directories.values():
         directory.mkdir(parents=True)
         (directory / "keep.txt").write_text("Owned fixture data must survive reset.\n")
-    # Docker otherwise creates root-owned placeholders for this nested read-only bind.
-    dashboard_target = directories["grafana"] / "dashboards/tp-link-power.json"
-    dashboard_target.parent.mkdir()
-    dashboard_target.touch()
     mapping(config["grafana"])["data_directory"] = "../owned data $cache/grafana"
     mapping(config["prometheus"]).update(
         {
@@ -103,6 +99,7 @@ def test_selected_yaml_bind_storage_persists_and_reset_preserves_host_files(tmp_
         cli(instance, environment, "up", config=selected)
         verify_rendered_configuration(runtime_mount(instance), port=18094, level="DEBUG")
         verify_bind_mounts(instance, directories)
+        assert not (directories["grafana"] / "dashboards").exists()
         prometheus = instance.url("prometheus", 9090)
         wait_for(lambda: metric_values(query(prometheus, 'current_consumption{host="192.0.2.10"}')) == [100])
         captured_at = time.time()
@@ -112,6 +109,7 @@ def test_selected_yaml_bind_storage_persists_and_reset_preserves_host_files(tmp_
         cli(instance, environment, "down", config=selected)
         cli(instance, environment, "up", config=selected)
         verify_bind_mounts(instance, directories)
+        assert not (directories["grafana"] / "dashboards").exists()
         prometheus = instance.url("prometheus", 9090)
         assert query(prometheus, 'current_consumption{host="192.0.2.10"}', at=captured_at) == before
         grafana = instance.url("grafana", 3000)
@@ -122,6 +120,7 @@ def test_selected_yaml_bind_storage_persists_and_reset_preserves_host_files(tmp_
             assert directory.is_dir()
             assert (directory / "keep.txt").read_text() == "Owned fixture data must survive reset.\n"
         assert (directories["grafana"] / "grafana.db").is_file()
+        assert not (directories["grafana"] / "dashboards").exists()
         assert (directories["prometheus"] / "wal").is_dir()
         assert selected.read_bytes() == source_bytes
         assert (instance.directory / ".env").read_text() == env_content

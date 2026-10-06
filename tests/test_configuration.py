@@ -426,8 +426,12 @@ def test_rendered_exporter_target_retains_static_labels(checkout: Path) -> None:
         (("discovery_options", "discovery_timeout"), -5),
         (("discovery_options", "discovery_timeout"), None),
         (("discovery_options", "discovery_timeout"), True),
+        (("discovery_options", "discovery_timeout"), 0.5),
+        (("discovery_options", "discovery_timeout"), 1.0),
         (("discovery_options", "timeout"), -5),
         (("discovery_options", "timeout"), True),
+        (("discovery_options", "timeout"), 0.5),
+        (("discovery_options", "timeout"), 1.0),
         (("discovery_options", "discovery_packets"), 0),
         (("discovery_options", "discovery_packets"), 1.5),
         (("discovery_options", "discovery_packets"), True),
@@ -545,3 +549,71 @@ def test_explicit_native_exporter_schema_explains_required_wrapper(checkout: Pat
     assert "schema" in message
     assert "section" in message
     assert selected.read_text(encoding="utf-8") == content
+
+
+@pytest.mark.parametrize("option", ["tapo_username_env_key", "tapo_password_env_key"])
+@pytest.mark.parametrize("value", [None, 123, "", " ", "1INVALID", "PRIVATE-KEY", "${PRIVATE_SECRET}", "PRIVATE\nKEY"])
+def test_custom_credential_keys_require_environment_identifiers(
+    checkout: Path, settings: Settings, option: str, value: object
+) -> None:
+    """Invalid names cannot inject Compose expressions or leak their contents in errors."""
+    settings["exporter"]["exporters"]["tapo"]["discovery_options"][option] = value
+    write_settings(checkout, settings)
+    with pytest.raises(ValueError, match="environment variable identifier") as error:
+        configuration.load_configuration(checkout, {})
+    assert "PRIVATE" not in str(error.value)
+    assert not (checkout / ".runtime").exists()
+
+
+def test_custom_credential_names_render_only_environment_references(
+    checkout: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Forward native custom credential keys without reading or persisting their values."""
+    discovery = settings["exporter"]["exporters"]["tapo"]["discovery_options"]
+    discovery.update(
+        {
+            "tapo_username_env_key": "CUSTOM_USER",
+            "tapo_password_env_key": "custom_password",  # pragma: allowlist secret
+        }
+    )
+    monkeypatch.setenv("CUSTOM_USER", "PRIVATE_TEST_USERNAME")
+    monkeypatch.setenv("custom_password", "PRIVATE_TEST_PASSWORD")
+    write_settings(checkout, settings)
+    effective = configuration.load_configuration(checkout, {})
+    runtime = configuration.render_configuration(checkout, effective)
+    document = yaml.safe_load((runtime / "compose.storage.yaml").read_text())
+    assert document["services"]["exporter"]["environment"] == {
+        "CUSTOM_USER": "${CUSTOM_USER:-}",
+        "custom_password": "${custom_password:-}",
+    }
+    assert yaml.safe_load((runtime / "exporter.yaml").read_text()) == settings["exporter"]
+    assert all("PRIVATE_TEST" not in path.read_text() for path in runtime.iterdir())
+
+
+@pytest.mark.parametrize("value", [True, False, None, 0, -1, -0.5, "10", float("inf"), float("nan")])
+def test_invalid_whole_device_update_timeout_fails_before_rendering(
+    checkout: Path, settings: Settings, value: object
+) -> None:
+    """Versioned update budgets reject nonpositive, nonfinite and nonnumeric settings."""
+    settings["exporter"]["exporters"]["tapo"]["update_timeout"] = value
+    write_settings(checkout, settings)
+    with pytest.raises(ValueError, match=r"positive finite|Numeric settings must be finite"):
+        configuration.load_configuration(checkout, {})
+    assert not (checkout / ".runtime").exists()
+
+
+@pytest.mark.parametrize("value", [1, 0.5, 10.0])
+def test_whole_device_update_timeout_is_optional_and_preserved(
+    checkout: Path, settings: Settings, value: float
+) -> None:
+    """New budgets pass through explicitly without changing older image-compatible defaults."""
+    baseline = configuration.load_configuration(checkout, {})
+    baseline_exporter = baseline["exporter"]
+    assert isinstance(baseline_exporter, dict)
+    assert "update_timeout" not in baseline_exporter["exporters"]["tapo"]
+    settings["exporter"]["exporters"]["tapo"]["update_timeout"] = value
+    write_settings(checkout, settings)
+    effective = configuration.load_configuration(checkout, {})
+    runtime = configuration.render_configuration(checkout, effective)
+    native = yaml.safe_load((runtime / "exporter.yaml").read_text())
+    assert native["exporters"]["tapo"]["update_timeout"] == value

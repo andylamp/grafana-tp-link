@@ -182,7 +182,9 @@ def _resolve_overrides(compose: list[str], directory: Path) -> tuple[int, dict[s
             "An empty shell value overrides .env. Existing .env was preserved."
         )
         raise ValueError(message)
-    return 0, {name: environment.get(name) or "" for name in OVERRIDE_NAMES}
+    # Compose serializes literal dollars as $$ so its model can be loaded again.
+    # Decode that representation once before validating or re-rendering these values.
+    return 0, {name: (environment.get(name) or "").replace("$$", "$") for name in OVERRIDE_NAMES}
 
 
 def _validate_configuration(compose: list[str], directory: Path, *, environment: dict[str, str]) -> int:
@@ -407,6 +409,11 @@ def _compose(arguments: argparse.Namespace, directory: Path) -> int:
         "PYPROM_RUNTIME_DIR": str(directory / ".runtime" / "unconfigured"),
     }
     compose.extend(files)
+    # Compose can quote credential values in malformed-dotenv diagnostics. Validate
+    # privately before handing terminal output to the lifecycle operation.
+    status = _validate_configuration(compose, directory, environment=environment)
+    if status:
+        return status
     return _run([*compose, *_lifecycle_arguments(arguments)], directory, environment=environment)
 
 

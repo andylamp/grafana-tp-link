@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING
 import pytest
 import yaml
 
-from grafana_tp_link.configuration import OVERRIDE_NAMES
+from grafana_tp_link import cli as stack_cli
+from grafana_tp_link.configuration import OVERRIDE_NAMES, compose_environment, load_configuration, render_configuration
 from tests.integration.support import FIXTURES, TEST_PASSWORD, create_stack, http, mapping, run, wait_for
 
 if TYPE_CHECKING:
@@ -383,3 +384,120 @@ def test_up_recreates_containers_after_yaml_settings_change(tmp_path: Path) -> N
         assert original_runtime.is_dir()
     finally:
         instance.compose("down", "--volumes", "--remove-orphans", "--timeout", "10")
+
+
+@pytest.mark.parametrize("source", ["dotenv", "shell", "empty-shell", "compose-override"])
+def test_custom_credential_keys_resolve_privately_with_compose_precedence(tmp_path: Path, source: str) -> None:
+    """Resolve fake credentials through real Compose without starting containers or devices."""
+    instance, environment = prepare_cli_stack(tmp_path)
+    config_file = tmp_path / "config/stack.yaml"
+    config = mapping(yaml.safe_load(config_file.read_text()))
+    tapo = mapping(mapping(mapping(config["exporter"])["exporters"])["tapo"])
+    discovery = mapping(tapo["discovery_options"])
+    discovery.update(
+        {
+            "tapo_username_env_key": "AUDIT_TAPO_USER",
+            "tapo_password_env_key": "AUDIT_TAPO_PASSWORD",  # pragma: allowlist secret
+        }
+    )
+    config_file.write_text(yaml.safe_dump(config))
+    for key in ("AUDIT_TAPO_USER", "AUDIT_TAPO_PASSWORD"):
+        environment.pop(key, None)
+    write_environment(
+        tmp_path,
+        "AUDIT_TAPO_USER=fixture-user\nAUDIT_TAPO_PASSWORD='fixture$dotenv#credential'\n",  # pragma: allowlist secret
+    )
+    effective = load_configuration(tmp_path, {})
+    runtime = render_configuration(tmp_path, effective)
+    environment.update(compose_environment(effective, runtime))
+    expected = "fixture$dotenv#credential"
+    if source in {"shell", "empty-shell", "compose-override"}:
+        expected = "" if source == "empty-shell" else "fixture$shell#credential"
+        environment["AUDIT_TAPO_PASSWORD"] = expected
+    command = [
+        instance.docker,
+        "compose",
+        "--env-file",
+        str(tmp_path / ".env"),
+        "-f",
+        str(tmp_path / "compose.yaml"),
+        "-f",
+        str(runtime / "compose.storage.yaml"),
+    ]
+    if source == "compose-override":
+        override = tmp_path / "override.yaml"
+        override.write_text("services:\n  exporter:\n    environment:\n      AUDIT_TAPO_PASSWORD: fixture-override\n")
+        command.extend(["-f", str(override)])
+        expected = "fixture-override"
+    model = mapping(json.loads(run([*command, "config", "--format", "json"], environment=environment)))
+    exporter = mapping(mapping(model["services"])["exporter"])
+    credentials = mapping(exporter["environment"])
+    assert credentials["AUDIT_TAPO_USER"] == "fixture-user"
+    # Serialized Compose models escape dollars so a second load preserves the literal value.
+    assert credentials["AUDIT_TAPO_PASSWORD"] == expected.replace("$", "$$")
+    assert all("fixture" not in path.read_text() for path in runtime.iterdir())
+    assert "fixture" not in config_file.read_text()
+
+
+@pytest.mark.parametrize("source", ["dotenv", "shell"])
+@pytest.mark.parametrize("suffix", ["$cache", "$$cache", "${AUDIT_STORAGE_SUFFIX}"])
+def test_environment_storage_paths_preserve_literal_dollars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, suffix: str
+) -> None:
+    """Resolve and re-render real Compose overrides without changing literal host-directory names."""
+    instance, environment = prepare_cli_stack(tmp_path)
+    for name in (*OVERRIDE_NAMES, "GRAFANA_ADMIN_PASSWORD"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("cache", "must-not-expand")
+    monkeypatch.setenv("AUDIT_STORAGE_SUFFIX", "must-not-expand")
+    paths = {
+        "GRAFANA_DATA_DIRECTORY": f"grafana data {suffix}",
+        "PROMETHEUS_DATA_DIRECTORY": str(tmp_path / f"prometheus data {suffix}"),
+    }
+    values = paths if source == "dotenv" else dict.fromkeys(paths, "unused dotenv path")
+    content = write_environment(tmp_path, "".join(f"{name}='{value}'\n" for name, value in values.items()))
+    if source == "shell":
+        for name, value in paths.items():
+            monkeypatch.setenv(name, value)
+    command = [
+        instance.docker,
+        "compose",
+        "--project-directory",
+        str(tmp_path),
+        "--env-file",
+        str(tmp_path / ".env"),
+    ]
+    status, overrides = stack_cli._resolve_overrides(command, tmp_path)
+    assert status == 0
+    assert {name: overrides[name] for name in paths} == paths
+    effective = load_configuration(tmp_path, overrides)
+    runtime = render_configuration(tmp_path, effective)
+    environment.update(compose_environment(effective, runtime))
+    model = mapping(
+        json.loads(
+            run(
+                [
+                    *command,
+                    "-f",
+                    str(tmp_path / "compose.yaml"),
+                    "-f",
+                    str(runtime / "compose.storage.yaml"),
+                    "config",
+                    "--format",
+                    "json",
+                ],
+                environment=environment,
+            )
+        )
+    )
+    services = mapping(model["services"])
+    for service, target in (("grafana", "/var/lib/grafana"), ("prometheus", "/prometheus")):
+        volumes = mapping(services[service])["volumes"]
+        assert isinstance(volumes, list)
+        mount = next(mapping(volume) for volume in volumes if mapping(volume)["target"] == target)
+        expected = str(tmp_path / paths[f"{service.upper()}_DATA_DIRECTORY"])
+        # The final serialized model must escape each original dollar exactly once.
+        assert mount["source"] == expected.replace("$", "$$")
+        assert mapping(mount["bind"])["create_host_path"] is False
+        assert not Path(expected).exists()
+    assert (tmp_path / ".env").read_text() == content

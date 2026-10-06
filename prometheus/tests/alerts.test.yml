@@ -156,3 +156,120 @@ tests:
   - eval_time: 24h1m
     alertname: TapoPlugReadingsMissing
     exp_alerts: []
+- name: Older exporters without operational telemetry do not imply success or failure
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: 1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: TapoDeviceUpdateFailing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoScrapeRefreshWaitsTimingOut
+    exp_alerts: []
+- name: Never-successful hosts alert after five minutes and recover on SDK success
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: 1x20
+  - series: tapo_device_update_success{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="unknown"}
+    values: 0x12 1x8
+  - series: tapo_device_last_success_timestamp_seconds{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="unknown"}
+    values: 0x20
+  alert_rule_test:
+  - eval_time: 4m
+    alertname: TapoDeviceUpdateFailing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoDeviceUpdateFailing
+    exp_alerts:
+    - exp_labels:
+        job: pyprom-exporters
+        instance: exporter:8090
+        host: 192.0.2.10
+        severity: warning
+      exp_annotations:
+        summary: Plug SDK updates are failing
+        description: 'Host 192.0.2.10 has no successful latest SDK update for five minutes. Check discovery, credentials and connectivity; this is not a physical sensor freshness test.'
+  - eval_time: 7m
+    alertname: TapoDeviceUpdateFailing
+    exp_alerts: []
+  promql_expr_test:
+  - expr: time() - (tapo_device_last_success_timestamp_seconds{job="pyprom-exporters"} > 0)
+    eval_time: 6m
+    exp_samples: []
+- name: Exporter outage suppresses device and scrape-wait operational alerts
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: 0x20
+  - series: tapo_device_update_success{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="Desk"}
+    values: 0x20
+  - series: tapo_scrape_refresh_timeouts_total{job="pyprom-exporters",instance="exporter:8090"}
+    values: 0+1x20
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: TapoDeviceUpdateFailing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoScrapeRefreshWaitsTimingOut
+    exp_alerts: []
+- name: Occasional scrape waits do not trigger a persistent alert
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: 1x20
+  - series: tapo_device_update_success{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="Desk"}
+    values: 1x20
+  - series: tapo_scrape_refresh_timeouts_total{job="pyprom-exporters",instance="exporter:8090"}
+    values: 0+1x2 2x18
+  alert_rule_test:
+  - eval_time: 6m
+    alertname: TapoDeviceUpdateFailing
+    exp_alerts: []
+  - eval_time: 6m
+    alertname: TapoScrapeRefreshWaitsTimingOut
+    exp_alerts: []
+- name: Repeated scrape waits alert despite successful HTTP and then clear
+  interval: 30s
+  input_series:
+  - series: up{job="pyprom-exporters",instance="exporter:8090"}
+    values: 1x32
+  - series: tapo_scrape_refresh_timeouts_total{job="pyprom-exporters",instance="exporter:8090"}
+    values: 0+1x12 12x20
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: TapoScrapeRefreshWaitsTimingOut
+    exp_alerts: []
+  - eval_time: 4m
+    alertname: TapoScrapeRefreshWaitsTimingOut
+    exp_alerts:
+    - exp_labels:
+        job: pyprom-exporters
+        instance: exporter:8090
+        severity: warning
+      exp_annotations:
+        summary: Exporter callers repeatedly time out waiting for updates
+        description: At least three refresh waits timed out within five minutes. HTTP scrapes can succeed with older readings; review update durations, the exporter wait and the Prometheus timeout.
+  - eval_time: 12m
+    alertname: TapoScrapeRefreshWaitsTimingOut
+    exp_alerts: []
+- name: Counter rates survive an exporter restart
+  interval: 30s
+  input_series:
+  - series: tapo_device_update_failures_total{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="Desk"}
+    values: 0 2 4 0 2 4
+  - series: tapo_device_update_timeouts_total{job="pyprom-exporters",instance="exporter:8090",host="192.0.2.10",alias="Desk"}
+    values: 0 1 2 0 1 2
+  promql_expr_test:
+  - expr: sum(rate(tapo_device_update_failures_total{job="pyprom-exporters"}[2m])) > bool 0
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 1
+  - expr: sum(rate(tapo_device_update_timeouts_total{job="pyprom-exporters"}[2m])) > bool 0
+    eval_time: 2m
+    exp_samples:
+    - labels: '{}'
+      value: 1

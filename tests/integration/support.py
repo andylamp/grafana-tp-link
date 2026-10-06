@@ -173,6 +173,8 @@ def isolated_exporter_configuration(source: str) -> str:
     discovery = mapping(exporter.setdefault("discovery_options", {}))
     discovery["perform_discovery"] = False
     discovery.pop("credentials", None)
+    discovery.pop("tapo_username_env_key", None)
+    discovery.pop("tapo_password_env_key", None)
     return yaml.safe_dump(config, sort_keys=False)
 
 
@@ -189,6 +191,12 @@ def prepare_checkout(directory: Path) -> dict[str, object]:
         shutil.copytree(ROOT / name, directory / name)
     for name in ("compose.yaml", "dash.json"):
         shutil.copyfile(ROOT / name, directory / name)
+    if image := os.getenv("PYPROM_TEST_EXPORTER_IMAGE"):
+        # Apply explicit development images only to this disposable checkout.
+        compose_file = directory / "compose.yaml"
+        model = mapping(yaml.safe_load(compose_file.read_text()))
+        mapping(mapping(model["services"])["exporter"])["image"] = image
+        compose_file.write_text(yaml.safe_dump(model, sort_keys=False))
     (directory / "config").mkdir()
     config = mapping(yaml.safe_load((ROOT / "config/stack.yaml").read_text()))
     # User-selected host storage must never be mounted into a disposable test project.

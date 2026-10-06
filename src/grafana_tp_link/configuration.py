@@ -60,6 +60,12 @@ DURATION_MULTIPLIERS = (31_536_000_000, 604_800_000, 86_400_000, 3_600_000, 60_0
 DURATION_PATTERN = re.compile(r"(?:(\d+)y)?(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?(?:(\d+)ms)?")
 SIZE_PATTERN = re.compile(r"(\d+(?:\.\d+)?)(B|KB|MB|GB|TB|PB|EB)")
 SIZE_UNITS = ("B", "KB", "MB", "GB", "TB", "PB", "EB")
+ENVIRONMENT_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Environment variable identifiers, never credential values.
+CREDENTIAL_ENV_KEYS = {
+    "tapo_username_env_key": "TP_LINK_USERNAME",
+    "tapo_password_env_key": "TP_LINK_PASSWORD",  # nosec B105 # pragma: allowlist secret
+}
 HOST_LABEL = re.compile(r"[A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?")
 MAX_HOST_LENGTH = 253
 MAX_LABEL_LENGTH = 63
@@ -418,16 +424,27 @@ def _positive_seconds(value: object, location: str) -> float:
 
 
 def _validate_discovery(value: object) -> None:
-    """Check advertised discovery settings while leaving native defaults implicit."""
+    """Check advertised discovery settings while leaving native defaults implicit.
+
+    Raises
+    ------
+    ValueError
+        If a credential environment name is not a portable identifier.
+    """
     if value is None:
         return
     discovery = _mapping(value, "exporter.exporters.tapo.discovery_options")
     _positive_integer(discovery.get("discovery_packets", 3), "discovery_options.discovery_packets")
-    _positive_seconds(discovery.get("discovery_timeout", 5), "discovery_options.discovery_timeout")
+    _positive_integer(discovery.get("discovery_timeout", 5), "discovery_options.discovery_timeout")
     if discovery.get("timeout") is not None:
-        _positive_seconds(discovery["timeout"], "discovery_options.timeout")
+        _positive_integer(discovery["timeout"], "discovery_options.timeout")
     if discovery.get("port") is not None:
         _port(discovery["port"], "discovery_options.port")
+    for option, default in CREDENTIAL_ENV_KEYS.items():
+        name = discovery.get(option, default)
+        if not isinstance(name, str) or ENVIRONMENT_KEY.fullmatch(name) is None:
+            message = f"discovery_options.{option} must be a nonempty environment variable identifier."
+            raise ValueError(message)
 
 
 def _validate_native(configuration: dict[str, object], *, require_devices: bool) -> float:
@@ -455,6 +472,8 @@ def _validate_native(configuration: dict[str, object], *, require_devices: bool)
         message = "exporter.exporters.tapo.devices must list individual IPs or hostnames; at least one is required."
         raise ValueError(message)
     _positive_integer(tapo.get("max_concurrent_devices", 10), "exporter.exporters.tapo.max_concurrent_devices")
+    if "update_timeout" in tapo:
+        _positive_seconds(tapo["update_timeout"], "exporter.exporters.tapo.update_timeout")
     if options.get("refresh_interval") is not None:
         _positive_integer(options["refresh_interval"], "prometheus_options.refresh_interval")
     _validate_discovery(tapo.get("discovery_options"))
@@ -614,7 +633,7 @@ def _datasource_document(directory: Path, configuration: dict[str, object]) -> d
 
 
 def _storage_document(directory: Path, configuration: dict[str, object]) -> dict[str, object]:
-    """Choose managed volumes or host binds without creating storage directories.
+    """Derive storage mounts and custom credential references without reading secrets.
 
     Returns
     -------
@@ -633,6 +652,16 @@ def _storage_document(directory: Path, configuration: dict[str, object]) -> dict
             source = absolute_path.replace("$", "$$")
             mount.update(type="bind", source=source, bind={"create_host_path": False})
         services[service] = {"volumes": [mount]}
+    # Compose resolves values from the shell/.env; generated files contain references only.
+    _, tapo, _ = _native_sections(configuration)
+    discovery = _mapping(tapo.get("discovery_options") or {}, "discovery_options")
+    environment = {
+        name: "${" + name + ":-}"
+        for option, default in CREDENTIAL_ENV_KEYS.items()
+        if (name := cast("str", discovery.get(option, default))) != default
+    }
+    if environment:
+        services["exporter"] = {"environment": environment}
     return {"services": services}
 
 

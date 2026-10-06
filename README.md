@@ -14,7 +14,7 @@ before starting these containers. The new stack uses fresh volumes by default an
 | --- | --- | --- |
 | pyprom-exporters | 0.2.0 | Concurrent Tapo/Kasa discovery and live measurements |
 | Prometheus | 3.15.0 | Time-series storage, scraping and alert evaluation |
-| Grafana | 13.2.2 | Provisioned power, energy and health dashboard |
+| Grafana | 13.2.3 | Provisioned power, energy and health dashboard |
 
 Images are pinned by version and digest in [compose.yaml](compose.yaml). The exporter replaces
 `fffonion/tplink-plug-exporter`; its metrics and device configuration are different.
@@ -199,7 +199,10 @@ The `exporter` section contains the exporter's native configuration, including d
 live-refresh settings and metric definitions. It is nested under `exporter` so the service settings remain in one file.
 The utility validates shared settings and common device options.
 The exporter validates advanced native options at startup.
-Do not put account credentials in YAML.
+Do not put account credentials in YAML. To use other credential environment names, set
+`discovery_options.tapo_username_env_key` and `discovery_options.tapo_password_env_key` under `exporter.exporters.tapo`,
+then supply those variables in `.env` or the shell. Names must be environment identifiers (letters, digits and underscores,
+starting with a letter or underscore). The renderer forwards references to Compose; credential values stay out of YAML.
 
 | `.env` credential | Default | Meaning |
 | --- | --- | --- |
@@ -301,7 +304,8 @@ also work. The containers keep their native paths: Grafana writes to `/var/lib/g
 Create the host directories on the Docker host and make them writable by the respective container users before starting.
 The utility never creates, changes ownership of, copies or deletes host data directories; missing bind directories make
 startup fail instead of creating empty storage. `check` runs Prometheus validation, but does not test Grafana's storage
-permissions or start Grafana.
+permissions or start Grafana. The provisioned dashboard is mounted under `/etc/grafana/dashboards`, outside the
+Grafana data directory, so Docker does not create dashboard mount placeholders in your stored data.
 
 Apply changes with `power-monitor --config config.local.yaml check` and `power-monitor --config config.local.yaml up`
 (or omit `--config` for the default file). Storage selection is generated from YAML; no Compose override is needed.
@@ -342,12 +346,28 @@ Under `exporter.exporters.tapo`:
 - `prometheus_options.scrape_timeout: 20.0` caps how long a scrape waits for the refresh.
 - `max_concurrent_devices: 10` bounds concurrent device operations.
 - `discovery_options.timeout: 5` sets the individual device request timeout in seconds.
+  Both discovery timeouts use positive whole seconds, matching the exporter configuration schema.
 
 Keep the exporter wait below Prometheus's scrape timeout, and the scrape timeout at or below the scrape interval.
 A positive `refresh_interval` enables background polling instead of live probing. Adjust concurrency or polling intervals
 based on observed device latency and LAN capacity; larger fleets and unreachable plugs can lengthen refreshes.
-Overlapping scrapes share an in-flight refresh. If its wait expires, the exporter can return an older snapshot.
+Overlapping scrapes share an in-flight refresh. If its wait expires, the exporter returns the latest available readings,
+including completed healthy updates from that pass.
 Validate and apply any changes using `power-monitor check` and `power-monitor up`.
+
+With exporter 0.3.0 or newer, `exporter.exporters.tapo.update_timeout` optionally sets a positive, finite deadline in
+seconds for one complete device update (default `10.0`). It includes retries inside python-kasa; the exporter does not
+repeat the whole update after that budget. A timed-out session gets up to one additional second for cleanup
+(or `update_timeout`, if shorter) before recovery.
+This differs from `discovery_options.timeout`, which limits individual device requests, and
+`prometheus_options.scrape_timeout`, which limits how long an HTTP scrape waits. Do not add `update_timeout` when
+using an older exporter image: its configuration schema does not support the option.
+
+Healthy retained devices update before bounded retries of known failures and missing-host recovery. Successful device
+readings become available as their updates finish, so one slow or unavailable plug does not hold back every healthy
+reading. A failed plug loses its measurement series while retaining diagnostics and its last-success timestamp, then
+recovers through later refreshes. A scrape may finish while the shared refresh continues handling failures; check the
+operational panels for that distinction.
 
 ## Reading and reusing the dashboard
 
@@ -391,25 +411,52 @@ A blank reading means unavailable data, not zero. Totals include only selected d
 The same physical plug monitored by multiple exporters can be counted more than once. Model and firmware capabilities
 vary, so a working power reading does not imply that voltage, current, energy or Wi-Fi metrics are available.
 
-**Exporter scrape status and scrape age describe Prometheus requests, not device freshness.** The exporter does not expose
-per-device update timestamps, online status or relay state. A successful scrape can contain an older snapshot; inspect
-exporter logs when values stop changing. Graphs preserve gaps, and queries hide device values when the exporter scrape
-has failed.
+**Exporter scrape status and scrape age describe Prometheus requests, not device freshness.** The operational panels
+require exporter 0.3.0 or newer and show each device's latest update result, update duration, time since its last successful
+SDK update, and failure/timeout rates. Never-successful devices have no last-success age. These diagnostics describe SDK
+communication; they do not establish physical-sensor freshness, relay state, or whether a plug will answer the next request.
+
+Exporter-wide panels show the last completed refresh duration, whether a refresh is still running, and how often scrape
+callers exhaust their refresh wait. A successful HTTP scrape can return completed device updates while slower recovery
+work continues.
+Device diagnostics remain available for failed plugs; missing power readings are never replaced with zero. Graphs preserve
+gaps, and power queries hide device values when the exporter scrape has failed. Older exporters have no operational metrics;
+use their existing scrape panels and logs when investigating unchanged readings.
+
+| Operational metric (exporter 0.3.0+) | Meaning |
+| --- | --- |
+| `tapo_device_update_success` | Latest SDK update succeeded: `1`; failed or never succeeded: `0` |
+| `tapo_device_last_success_timestamp_seconds` | Unix time of the last successful SDK update; `0` before success |
+| `tapo_device_update_duration_seconds` | Latest complete SDK attempt, including internal retries; excludes queue/discovery/cleanup |
+| `tapo_device_update_failures_total` | Failed SDK update attempts, including timeouts |
+| `tapo_device_update_timeouts_total` | SDK update timeouts, including the whole-update deadline |
+| `tapo_refresh_duration_seconds` | Duration of the last completed refresh pass |
+| `tapo_refresh_in_progress` | Whether a shared refresh is running: `1` or `0` |
+| `tapo_scrape_refresh_timeouts_total` | Scrape callers whose refresh wait expired |
+
+Per-device diagnostics use `host` and `alias`; Prometheus adds `job` and `instance`. Failure and timeout panels display
+counter rates, while duration/state panels display gauges. Failure counters include timeouts, so the two rates overlap.
+Configured hosts that have never been discovered use alias `unknown` and success `0`; discovery failures do not count as
+SDK update attempts and therefore do not increment the update counters.
 
 ### Alerts and troubleshooting
 
-[prometheus/alerts.yml](prometheus/alerts.yml) evaluates three rules:
+[prometheus/alerts.yml](prometheus/alerts.yml) evaluates five rules:
 
 | Alert | Condition |
 | --- | --- |
 | `TapoExporterDown` | An exporter target fails scrapes for two minutes |
 | `TapoNoPowerReadings` | A reachable exporter returns no power series for five minutes |
 | `TapoPlugReadingsMissing` | A host seen within 24 hours has no current power series for five minutes |
+| `TapoDeviceUpdateFailing` | A reachable exporter reports a failed or never-successful latest device update for five minutes |
+| `TapoScrapeRefreshWaitsTimingOut` | At least three scrape-wait timeouts in five minutes, sustained for two minutes |
 
 These rules are evaluated in Prometheus. No Alertmanager or notification delivery is configured.
 The missing-host rule cannot detect a plug that has never reported, or one absent for longer than its 24-hour history
-window. Intentionally removing a previously observed host can trigger it. None of these rules can detect an old snapshot
-that is still being returned successfully.
+window. Intentionally removing a previously observed host can trigger it. The device-update and scrape-wait rules require
+exporter 0.3.0 or newer and a successful exporter scrape; the device-update rule also covers configured hosts that have
+never succeeded. These alerts do not establish physical-sensor freshness, and no universal last-success age threshold is
+applied. Use the age and refresh panels alongside the alerts when investigating stale readings.
 
 For missing readings, check `power-monitor status`, then `power-monitor logs exporter`.
 Confirm the YAML hosts and any active `TAPO_PLUG_DEVICES` override, reachability from Docker, credentials
@@ -444,6 +491,13 @@ make integration
 RUN_STACK_INTEGRATION=1 uv run --locked pytest -n 0 -m integration
 ```
 
+To test a locally built exporter before publishing it, explicitly select its image for the disposable suite:
+
+```sh
+PYPROM_TEST_EXPORTER_IMAGE=pyprom-exporters:local-test make integration
+```
+
+This override changes only copied test Compose files. Omitting it retains the image pinned in `compose.yaml`.
 The integration suite uses an isolated Compose project and fake devices/metrics. It does not require physical plugs
 or real account credentials. It validates configuration, provisioning, dashboard queries and monitoring failure cases.
 `make test` runs the regular tests; `make check` runs all prek hooks.

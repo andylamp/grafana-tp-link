@@ -553,7 +553,9 @@ def test_compose_override_order_is_preserved_for_every_operation(
         files = [final_arguments[index + 1] for index, value in enumerate(final_arguments) if value == "-f"]
         assert files == expected_files
     else:
-        resolved_configuration.assert_not_called()
+        resolved_configuration.assert_called_once()
+        assert resolved_configuration.call_args.args[0][-2:] == ["config", "--quiet"]
+        assert resolved_configuration.call_args.kwargs["capture_output"] is True
 
 
 @pytest.mark.parametrize("command", ["up", "check", "down", "reset"])
@@ -766,7 +768,8 @@ def test_recovery_ignores_missing_selected_config_and_credentials(
         arguments.append("--yes")
     assert cli.main(arguments) == 0
     command_runner.assert_called_once()
-    resolved_configuration.assert_not_called()
+    resolved_configuration.assert_called_once()
+    assert resolved_configuration.call_args.args[0][-2:] == ["config", "--quiet"]
     assert not (checkout / ".runtime").exists()
     assert not (checkout / ".env").exists()
 
@@ -859,3 +862,45 @@ def test_failed_up_retains_exit_status_and_prints_quoted_diagnostic_commands(
     assert commands[0][-1] == "status"
     assert commands[1][-2:] == ["logs", "--follow"]
     summary.assert_not_called()
+
+
+@pytest.mark.parametrize("command", ["down", "reset", "status", "logs", "pull"])
+def test_recovery_configuration_errors_do_not_expose_credentials(
+    checkout: Path,
+    command_runner: Mock,
+    resolved_configuration: Mock,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+) -> None:
+    """Malformed dotenv diagnostics remain private before any streamed lifecycle operation."""
+    marker = "PRIVATE_DOTENV_VALUE"
+    content = f'GRAFANA_ADMIN_PASSWORD="{marker}\n'
+    (checkout / ".env").write_text(content, encoding="utf-8")
+    resolved_configuration.return_value = subprocess.CompletedProcess(
+        [], 17, marker, f'unterminated quoted value "{marker}'
+    )
+    arguments = ["--directory", str(checkout), command]
+    if command == "reset":
+        arguments.append("--yes")
+    assert cli.main(arguments) == 17
+    command_runner.assert_not_called()
+    resolved_configuration.assert_called_once()
+    assert resolved_configuration.call_args.args[0][-2:] == ["config", "--quiet"]
+    assert resolved_configuration.call_args.kwargs["capture_output"] is True
+    output = capsys.readouterr()
+    assert marker not in output.out + output.err
+    assert "exit status 17" in output.err
+    assert (checkout / ".env").read_text(encoding="utf-8") == content
+
+
+@pytest.mark.parametrize("name", ["GRAFANA_DATA_DIRECTORY", "PROMETHEUS_DATA_DIRECTORY"])
+@pytest.mark.parametrize("value", ["data $cache", "data $$cache", "data ${literal}"])
+def test_resolved_overrides_decode_compose_dollars_exactly_once(
+    checkout: Path, resolved_configuration: Mock, name: str, value: str
+) -> None:
+    """Literal dollars survive Compose's escaped JSON model without additional interpolation."""
+    resolved_configuration.return_value.stdout = _probe_response({name: value.replace("$", "$$")})
+    status, overrides = cli._resolve_overrides(["/usr/bin/docker", "compose"], checkout)
+    assert status == 0
+    assert overrides[name] == value
+    assert all(not item for key, item in overrides.items() if key != name)
