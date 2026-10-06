@@ -439,6 +439,18 @@ def test_custom_credential_keys_resolve_privately_with_compose_precedence(tmp_pa
     assert "fixture" not in config_file.read_text()
 
 
+def verify_generated_bind_safety(runtime: Path) -> None:
+    """Require explicit no-create protection in generated YAML before Compose normalizes it."""
+    generated = mapping(yaml.safe_load((runtime / "compose.storage.yaml").read_text()))
+    for service in mapping(generated["services"]).values():
+        volumes = mapping(service).get("volumes", [])
+        assert isinstance(volumes, list)
+        for volume in volumes:
+            mount = mapping(volume)
+            if mount["type"] == "bind":
+                assert mapping(mount["bind"])["create_host_path"] is False
+
+
 @pytest.mark.parametrize("source", ["dotenv", "shell"])
 @pytest.mark.parametrize("suffix", ["$cache", "$$cache", "${AUDIT_STORAGE_SUFFIX}"])
 def test_environment_storage_paths_preserve_literal_dollars(
@@ -491,6 +503,7 @@ def test_environment_storage_paths_preserve_literal_dollars(
         )
     )
     services = mapping(model["services"])
+    verify_generated_bind_safety(runtime)
     for service, target in (("grafana", "/var/lib/grafana"), ("prometheus", "/prometheus")):
         volumes = mapping(services[service])["volumes"]
         assert isinstance(volumes, list)
@@ -498,6 +511,7 @@ def test_environment_storage_paths_preserve_literal_dollars(
         expected = str(tmp_path / paths[f"{service.upper()}_DATA_DIRECTORY"])
         # The final serialized model must escape each original dollar exactly once.
         assert mount["source"] == expected.replace("$", "$$")
-        assert mapping(mount["bind"])["create_host_path"] is False
+        # Some Compose encoders omit false-valued options from normalized JSON.
+        assert mapping(mount.get("bind", {})).get("create_host_path", False) is False
         assert not Path(expected).exists()
     assert (tmp_path / ".env").read_text() == content
