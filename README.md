@@ -3,16 +3,17 @@
 Monitor TP-Link Tapo and Kasa energy-monitoring plugs with
 [pyprom-exporters](https://github.com/andylamp/pyprom-exporters), Prometheus and Grafana.
 The stack provisions its datasource, dashboard and alert rules from this repository.
-It probes devices on scrape by default and keeps monitoring data in persistent Docker volumes.
+It probes devices on scrape by default, bounds device-update and recovery work, and keeps monitoring data in persistent
+Docker volumes. Per-device and exporter-wide diagnostics show failures, timeouts and recovery over time.
 
-**Already running the older stack?** Read [Migrating an existing installation](docs/migration.md)
-before starting these containers. The new stack uses fresh volumes by default and does not migrate old databases.
+**Migrating from `fffonion/tplink-plug-exporter`?** Read [Migrating an existing installation](docs/migration.md)
+before starting these containers. This stack uses separate volumes by default and does not migrate legacy databases.
 
 ## What is included
 
 | Component | Pinned version | Purpose |
 | --- | --- | --- |
-| pyprom-exporters | 0.2.0 | Concurrent Tapo/Kasa discovery and live measurements |
+| pyprom-exporters | 0.3.0 | Concurrent live measurements, bounded recovery and device-health metrics |
 | Prometheus | 3.15.0 | Time-series storage, scraping and alert evaluation |
 | Grafana | 13.2.3 | Provisioned power, energy and health dashboard |
 
@@ -23,7 +24,10 @@ The dashboard includes current power, daily/monthly energy, voltage, current, Wi
 Only Grafana's built-in panels are used. Datasource, job, exporter, host and device filters make it portable across
 installations, including devices with identical aliases.
 
-![Provisioned dashboard with simulated device readings](assets/power-dashboard.png)
+![Current Grafana dashboard showing power and energy for simulated devices](assets/power-dashboard.png)
+
+Preview of the provisioned dashboard on Grafana 13.2.3 with simulated readings and example device addresses.
+The [operational diagnostics](#reading-and-reusing-the-dashboard) also track device failures and exporter performance.
 
 ## Quick start
 
@@ -140,8 +144,23 @@ Paths are relative to the checkout; repeat `--compose-file` for additional files
 `compose.yaml`, then generated storage settings for `check`/`up`, then explicit overrides in the supplied order.
 Retain override options for `check`, `status`, `logs`, `reset` and other lifecycle commands too.
 
-Pulling downloads the versions recorded in `compose.yaml`; it does not select newer releases automatically.
-Review version and digest changes together, consult upstream upgrade notes, back up data, then run `pull` and `up`.
+### Updating an existing installation
+
+Pulling downloads the versions recorded in `compose.yaml`; it does not select newer releases automatically or restart
+running containers. After updating this checkout to the revision you intend to run, review its image/version changes
+and migration notes, back up persistent data, then apply it using the same configuration and Compose project:
+
+```sh
+uv sync --locked
+uv run --locked power-monitor pull
+uv run --locked power-monitor --config scratch/configs/home.yaml check
+uv run --locked power-monitor --config scratch/configs/home.yaml up
+```
+
+Replace the example profile with your own, or omit `--config` to use `config/stack.yaml`. Retain any `--compose-file`
+options and custom `COMPOSE_PROJECT_NAME`. `up` applies changed images and configuration while retaining storage;
+reset is only for deliberately discarding managed data. For the older `fffonion/tplink-plug-exporter` stack, follow the
+[migration guide](docs/migration.md) first because its project, volumes and metrics differ.
 
 ### Reset for a fresh run
 
@@ -345,29 +364,31 @@ Under `exporter.exporters.tapo`:
 - `prometheus_options.refresh_interval: null` probes on scrape.
 - `prometheus_options.scrape_timeout: 20.0` caps how long a scrape waits for the refresh.
 - `max_concurrent_devices: 10` bounds concurrent device operations.
+- `update_timeout: 10.0` bounds one complete SDK update, including its internal retries, in seconds.
+- `discovery_options.perform_discovery: false` uses the explicit device inventory instead of LAN broadcasts.
+- `discovery_options.discovery_timeout: 3` bounds each configured-host discovery attempt in seconds.
 - `discovery_options.timeout: 5` sets the individual device request timeout in seconds.
-  Both discovery timeouts use positive whole seconds, matching the exporter configuration schema.
+  Both discovery timeout settings use positive whole seconds, matching the exporter configuration schema.
 
 Keep the exporter wait below Prometheus's scrape timeout, and the scrape timeout at or below the scrape interval.
-A positive `refresh_interval` enables background polling instead of live probing. Adjust concurrency or polling intervals
-based on observed device latency and LAN capacity; larger fleets and unreachable plugs can lengthen refreshes.
+A positive integer `refresh_interval` enables background polling instead of live probing. Adjust concurrency or polling
+intervals based on observed device latency and LAN capacity; larger fleets and unreachable plugs can lengthen refreshes.
 Overlapping scrapes share an in-flight refresh. If its wait expires, the exporter returns the latest available readings,
 including completed healthy updates from that pass.
 Validate and apply any changes using `power-monitor check` and `power-monitor up`.
 
-With exporter 0.3.0 or newer, `exporter.exporters.tapo.update_timeout` optionally sets a positive, finite deadline in
-seconds for one complete device update (default `10.0`). It includes retries inside python-kasa; the exporter does not
-repeat the whole update after that budget. A timed-out session gets up to one additional second for cleanup
-(or `update_timeout`, if shorter) before recovery.
-This differs from `discovery_options.timeout`, which limits individual device requests, and
-`prometheus_options.scrape_timeout`, which limits how long an HTTP scrape waits. Do not add `update_timeout` when
-using an older exporter image: its configuration schema does not support the option.
+The pinned exporter 0.3.0 makes one SDK attempt per scheduled device update; python-kasa handles request retries
+inside that attempt. `update_timeout` is a positive, finite deadline for the whole attempt, separate from the individual
+request timeout and the HTTP scrape wait. A timed-out session gets up to one additional second per cleanup attempt
+(or `update_timeout`, if shorter); it must close before a replacement session is opened. Exporter images older than
+0.3.0 do not support `update_timeout` or the operational metrics below.
 
-Healthy retained devices update before bounded retries of known failures and missing-host recovery. Successful device
-readings become available as their updates finish, so one slow or unavailable plug does not hold back every healthy
-reading. A failed plug loses its measurement series while retaining diagnostics and its last-success timestamp, then
-recovers through later refreshes. A scrape may finish while the shared refresh continues handling failures; check the
-operational panels for that distinction.
+Healthy retained devices update first. Waiting scrapes can return after this stage while recovery continues.
+Known failures and missing hosts recover in fair waves, each bounded by `max_concurrent_devices`, with a 30-second
+per-host retry cooldown after failures. A newly failing device can still occupy its worker until the update deadline;
+completed healthy readings are published independently and remain available if the scrape wait expires.
+A failed plug loses its measurement series while retaining diagnostics and its last-success timestamp, then recovers
+through later refreshes. The operational panels distinguish HTTP scrape completion from a refresh still handling failures.
 
 ## Reading and reusing the dashboard
 
@@ -411,17 +432,20 @@ A blank reading means unavailable data, not zero. Totals include only selected d
 The same physical plug monitored by multiple exporters can be counted more than once. Model and firmware capabilities
 vary, so a working power reading does not imply that voltage, current, energy or Wi-Fi metrics are available.
 
-**Exporter scrape status and scrape age describe Prometheus requests, not device freshness.** The operational panels
-require exporter 0.3.0 or newer and show each device's latest update result, update duration, time since its last successful
+**Exporter scrape status and scrape age describe Prometheus requests, not device freshness.** The pinned exporter
+supplies operational panels showing each device's latest update result, update duration, time since its last successful
 SDK update, and failure/timeout rates. Never-successful devices have no last-success age. These diagnostics describe SDK
 communication; they do not establish physical-sensor freshness, relay state, or whether a plug will answer the next request.
 
 Exporter-wide panels show the last completed refresh duration, whether a refresh is still running, and how often scrape
 callers exhaust their refresh wait. A successful HTTP scrape can return completed device updates while slower recovery
-work continues.
-Device diagnostics remain available for failed plugs; missing power readings are never replaced with zero. Graphs preserve
-gaps, and power queries hide device values when the exporter scrape has failed. Older exporters have no operational metrics;
-use their existing scrape panels and logs when investigating unchanged readings.
+work continues. Device diagnostics remain available for failed plugs; missing power readings are never replaced with zero.
+Graphs preserve gaps, and power queries hide device values when the exporter scrape has failed. When importing the dashboard
+into another installation, exporter 0.3.0 or newer is required for these operational panels and their associated alerts.
+
+![Device update and exporter performance panels with simulated failure and recovery history](assets/exporter-health.png)
+
+The simulated history illustrates update failures, timeouts and recovery alongside healthy device updates.
 
 | Operational metric (exporter 0.3.0+) | Meaning |
 | --- | --- |
@@ -454,9 +478,9 @@ SDK update attempts and therefore do not increment the update counters.
 These rules are evaluated in Prometheus. No Alertmanager or notification delivery is configured.
 The missing-host rule cannot detect a plug that has never reported, or one absent for longer than its 24-hour history
 window. Intentionally removing a previously observed host can trigger it. The device-update and scrape-wait rules require
-exporter 0.3.0 or newer and a successful exporter scrape; the device-update rule also covers configured hosts that have
-never succeeded. These alerts do not establish physical-sensor freshness, and no universal last-success age threshold is
-applied. Use the age and refresh panels alongside the alerts when investigating stale readings.
+a successful exporter scrape; the device-update rule also covers configured hosts that have never succeeded.
+These alerts do not establish physical-sensor freshness, and no universal last-success age threshold is applied.
+Use the age and refresh panels alongside the alerts when investigating stale readings.
 
 For missing readings, check `power-monitor status`, then `power-monitor logs exporter`.
 Confirm the YAML hosts and any active `TAPO_PLUG_DEVICES` override, reachability from Docker, credentials
@@ -491,7 +515,7 @@ make integration
 RUN_STACK_INTEGRATION=1 uv run --locked pytest -n 0 -m integration
 ```
 
-To test a locally built exporter before publishing it, explicitly select its image for the disposable suite:
+To test a locally built exporter or a published release candidate, explicitly select its image for the disposable suite:
 
 ```sh
 PYPROM_TEST_EXPORTER_IMAGE=pyprom-exporters:local-test make integration
@@ -500,6 +524,8 @@ PYPROM_TEST_EXPORTER_IMAGE=pyprom-exporters:local-test make integration
 This override changes only copied test Compose files. Omitting it retains the image pinned in `compose.yaml`.
 The integration suite uses an isolated Compose project and fake devices/metrics. It does not require physical plugs
 or real account credentials. It validates configuration, provisioning, dashboard queries and monitoring failure cases.
+It also runs the actual exporter installed in the selected image against healthy and blocked fake devices, checking
+update deadlines, operational metrics and cleanup.
 `make test` runs the regular tests; `make check` runs all prek hooks.
 
 Ruff enables all stable and preview rules, ty checks Python, and Markdown uses the same
@@ -507,7 +533,7 @@ Ruff enables all stable and preview rules, ty checks Python, and Markdown uses t
 Python dependencies and tools are locked in `uv.lock`; update them with `uv lock --upgrade`, then rerun checks.
 Keep audit notes in ignored `scratch/` and generated reports in ignored `report/`.
 
-The **Code quality and tests** GitHub Actions workflow runs on pushes to every branch and on pull requests.
+The **Code quality and tests** GitHub Actions workflow runs on pushes to every branch, on pull requests and manually.
 Lint/format/type checks, Python 3.11–3.14 tests and package builds, and Docker integration tests run as parallel jobs.
 
 [Dependabot](.github/dependabot.yml) checks weekly and combines Python dependencies (including transitive dependencies),
@@ -515,7 +541,6 @@ GitHub Actions, Compose images and prek hooks into one version-update PR, with a
 Security updates are grouped separately for Python and GitHub Actions, the ecosystems here that support them.
 [GitHub cannot combine security updates across ecosystems or with version updates](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-security-updates#about-grouped-security-updates),
 so security fixes may produce additional PRs. The version-update limit does not delay security updates.
-Dependabot configuration takes effect after it reaches the default branch.
 
 ## Repository layout
 
