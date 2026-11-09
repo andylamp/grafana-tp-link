@@ -14,8 +14,8 @@ before starting these containers. This stack uses separate volumes by default an
 | Component | Pinned version | Purpose |
 | --- | --- | --- |
 | pyprom-exporters | 0.3.0 | Concurrent live measurements, bounded recovery and device-health metrics |
-| Prometheus | 3.15.0 | Time-series storage, scraping and alert evaluation |
-| Grafana | 13.2.3 | Provisioned power, energy and health dashboard |
+| Prometheus | 3.16.0 | Time-series storage, scraping and alert evaluation |
+| Grafana | 13.3.0 | Provisioned power, energy and health dashboard |
 
 Images are pinned by version and digest in [compose.yaml](compose.yaml). The exporter replaces
 `fffonion/tplink-plug-exporter`; its metrics and device configuration are different.
@@ -541,6 +541,42 @@ GitHub Actions, Compose images and prek hooks into one version-update PR, with a
 Security updates are grouped separately for Python and GitHub Actions, the ecosystems here that support them.
 [GitHub cannot combine security updates across ecosystems or with version updates](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-security-updates#about-grouped-security-updates),
 so security fixes may produce additional PRs. The version-update limit does not delay security updates.
+
+### Automatic Dependabot merges
+
+[Merge verified Dependabot updates](.github/workflows/dependabot-merge.yaml) runs after **Code quality and tests** finishes.
+It squash-merges a Dependabot PR only when every dependency update is a verified stable patch or minor increase and
+all six required CI jobs succeed. Major updates, prereleases, ambiguous versions and human-authored changes remain open
+for manual review. A grouped PR containing even one such update remains open as a whole; grouping is unchanged.
+When image updates omit their update type, the policy checks the old and new versions in signed Dependabot commit messages.
+Unknown or incomplete metadata never authorizes a merge.
+
+The workflow checks the current PR head again and merges that exact tested commit. It runs trusted default-branch code,
+never the PR's code, and does not reuse PR caches or artifacts. It does not leave GitHub's per-PR auto-merge enabled,
+so a later major update cannot inherit an earlier patch update's approval. Repository **Allow auto-merge** is not needed
+for this workflow; toggling that setting alone does not automatically opt Dependabot PRs into merging.
+
+For this repository or a fork, enable the workflow by merging it into the default branch and configuring
+**Settings → Branches → Branch protection rules** for that branch (`master` here):
+
+- Require status checks before merging and require branches to be up to date.
+- Require **Lint, formatting and type checks**, each **Tests and package build (Python 3.11–3.14)** job, and
+  **Docker stack integration tests**. Select GitHub Actions as the expected source.
+- Apply the requirements to administrators too. The merge workflow never bypasses protection.
+- Allow squash merging under **Settings → General → Pull Requests** and allow GitHub Actions to run.
+
+The workflow requests repository and pull-request write access plus read access to checks and statuses;
+no personal token is needed.
+If a dependency PR remains open, inspect its CI results and the merge workflow's policy reason.
+After fixing or rebasing it, rerun CI; a successful completion re-evaluates its current commit.
+Changes to required job names must also update the protection rule and the workflow's expected check names.
+Branch protection is a repository setting and is not copied when someone forks or clones this checkout.
+
+The merge uses `GITHUB_TOKEN`, so [GitHub suppresses new workflow runs caused by that token's merge events][token-events].
+The PR's required CI has already passed, but the default-branch push workflow does not run again after an automatic merge.
+If you later add a release workflow that must run on merge, use an appropriately scoped GitHub App token for that flow.
+
+[token-events]: https://docs.github.com/en/actions/concepts/security/github_token
 
 ## Repository layout
 

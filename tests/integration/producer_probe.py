@@ -19,12 +19,12 @@ from dataclasses import dataclass, field
 from importlib.metadata import version
 from unittest.mock import patch
 
-from kasa import Credentials  # ty: ignore[unresolved-import] - Installed in the exporter image.
-from pyprom_exporters.benchmarks.scalability import (  # ty: ignore[unresolved-import] - Image-owned simulation helpers.
+from kasa import Credentials  # ty: ignore[import-not-found] - Installed in the exporter image.
+from pyprom_exporters.benchmarks.scalability import (  # ty: ignore[import-not-found] - Image-owned simulation helpers.
     Activity,
     SimulatedDevice,
 )
-from pyprom_exporters.exporters.tapo import (  # ty: ignore[unresolved-import] - Exercise the installed producer itself.
+from pyprom_exporters.exporters.tapo import (  # ty: ignore[import-not-found] - Exercise the installed producer itself.
     TapoDiscoveryOptions,
     TapoExporterOptions,
     TapoPowerPlugPrometheusExporter,

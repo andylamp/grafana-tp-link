@@ -17,7 +17,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-xdist>=3.8.0",
     "ruff>=0.16.9",
-    "ty>=0.0.84",
+    "ty>=0.0.98",
 ]
 
 [build-system]
@@ -78,4 +78,4 @@ markers = ["integration: isolated Docker integration tests (RUN_STACK_INTEGRATIO
 python-version = "3.11"
 
 [tool.ty.src]
-include = ["src", "tests"]
+include = ["src", "tests", ".github/scripts"]
