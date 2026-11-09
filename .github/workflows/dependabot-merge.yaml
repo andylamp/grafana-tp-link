@@ -1,0 +1,109 @@
+name: Merge verified Dependabot updates
+
+on:
+  workflow_run:
+    workflows: [Code quality and tests]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: dependabot-merge-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: Merge passing patch and minor updates
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      contains(fromJSON('["push", "pull_request"]'), github.event.workflow_run.event) &&
+      github.event.workflow_run.path == '.github/workflows/lint.yaml' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: read
+    steps:
+      # workflow_run's github.sha is the trusted default branch, never the PR head.
+      - name: Check out trusted merge policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up trusted Python environment
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.12.19"
+          python-version: "3.14"
+          # Never restore a cache populated by a pull-request workflow.
+          enable-cache: false
+      - name: Install locked policy dependencies from the default branch
+        run: uv sync --locked --no-dev
+      - name: Verify the current PR and merge its tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          # Dependabot workflow_run events can have an empty pull_requests array.
+          # Resolve the PR through the authenticated API instead of trusting a title or label.
+          candidates=$(gh api --paginate --slurp "repos/$GH_REPO/commits/$RUN_HEAD/pulls?per_page=100")
+          pr_number=$(jq -r --arg repo "$GH_REPO" --arg base "$DEFAULT_BRANCH" '
+            add | map(select(
+              .state == "open" and .draft == false and
+              .user.login == "dependabot[bot]" and
+              .head.repo.full_name == $repo and .base.repo.full_name == $repo and
+              .base.ref == $base
+            )) | if length == 1 then .[0].number else empty end
+          ' <<< "$candidates")
+          if [[ -z "$pr_number" ]]; then
+            echo "No unique open Dependabot PR for this CI commit; nothing to merge."
+            exit 0
+          fi
+
+          gh api "repos/$GH_REPO/pulls/$pr_number" > "$RUNNER_TEMP/dependabot-pr.json"
+          gh api --paginate --slurp "repos/$GH_REPO/pulls/$pr_number/commits?per_page=100" |
+            jq 'add' > "$RUNNER_TEMP/dependabot-commits.json"
+          policy=$(uv run --locked --no-dev python .github/scripts/dependabot_policy.py \
+            "$RUNNER_TEMP/dependabot-pr.json" "$RUNNER_TEMP/dependabot-commits.json")
+          printf '%s\n' "$policy"
+          head_sha=$(jq -r '.head_sha' <<< "$policy")
+          if [[ $(jq -r '.eligible' <<< "$policy") != true || "$head_sha" != "$RUN_HEAD" ]]; then
+            echo "This PR needs manual review or its head changed since CI; leaving it open."
+            exit 0
+          fi
+
+          # Required checks include lint, all four Python versions and Docker integration.
+          # Both push and PR completions retry this gate if the other run is still pending.
+          if ! checks=$(gh pr checks "$pr_number" --required --json name,state); then
+            echo "Required checks have not all passed; leaving the PR open."
+            exit 0
+          fi
+          # GitHub can treat skipped/neutral checks as sufficient for branch protection.
+          # Automatic dependency merges require every expected job to actually succeed.
+          if ! jq -e '
+            . as $checks |
+            [
+              "Lint, formatting and type checks",
+              "Tests and package build (Python 3.11)",
+              "Tests and package build (Python 3.12)",
+              "Tests and package build (Python 3.13)",
+              "Tests and package build (Python 3.14)",
+              "Docker stack integration tests"
+            ] as $required |
+            all($checks[]; .state == "SUCCESS") and
+            all($required[]; . as $name | any($checks[]; .name == $name))
+          ' <<< "$checks" > /dev/null; then
+            echo "A required job is missing, skipped or not successful; leaving the PR open."
+            exit 0
+          fi
+
+          # Merge only this verified head. Do not leave auto-merge enabled for a future head:
+          # a later grouped update could contain a major version or a human-authored change.
+          # GitHub also enforces the protected branch's up-to-date/check requirements here.
+          gh pr merge "$pr_number" --squash --match-head-commit "$head_sha"
